@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "crukx-core"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/Crukx-dev/crukx-core?branch=main#9419fe4376ad5090b24c05f314e7695d2f8a26ee"
+source = "git+https://github.com/Crukx-dev/crukx-core?branch=main#0a4c97552aca8f365de4b61e8d2950d520055e09"
 dependencies = [
  "serde",
  "serde_json",
@@ -300,7 +300,7 @@ dependencies = [
 [[package]]
 name = "crukx-runner"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/Crukx-dev/crukx-core?branch=main#9419fe4376ad5090b24c05f314e7695d2f8a26ee"
+source = "git+https://github.com/Crukx-dev/crukx-core?branch=main#0a4c97552aca8f365de4b61e8d2950d520055e09"
 dependencies = [
  "crukx-core",
 ]
@@ -308,7 +308,7 @@ dependencies = [
 [[package]]
 name = "crukx-storage"
 version = "0.1.0-alpha.0"
-source = "git+https://github.com/Crukx-dev/crukx-core?branch=main#9419fe4376ad5090b24c05f314e7695d2f8a26ee"
+source = "git+https://github.com/Crukx-dev/crukx-core?branch=main#0a4c97552aca8f365de4b61e8d2950d520055e09"
 dependencies = [
  "crukx-core",
  "serde",

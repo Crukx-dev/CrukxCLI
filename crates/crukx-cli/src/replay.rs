@@ -1,6 +1,6 @@
 use crate::assertion::run_assertion;
 use crukx_core::contracts::replay::{ReplayDecision, ReplayOutcome, StepResult};
-use crukx_core::contracts::schema::{AssertContext, RegressionContract};
+use crukx_core::contracts::schema::{AssertContext, AssertResult, RegressionContract};
 use crukx_core::events::{ActionPhase, AgentAction};
 use crukx_runner::{spawn, ExecutionPolicy, SpawnRequest};
 use std::path::Path;
@@ -70,13 +70,29 @@ pub fn replay_contract(
         });
     }
 
-    let assertion_file = assertion_dir.join(&contract.assertion_file);
     let assertion_context = AssertContext {
         contract_id: contract.contract_id.clone(),
         source_session_id: contract.source_session_id.clone(),
         candidate_label: candidate_label.to_string(),
     };
-    let assertion = run_assertion(&assertion_file, &assertion_context, cwd);
+    // `assertion_file` is data read back out of the contract's own JSON —
+    // never trust it as a bare path segment. `Path::join` doesn't stop
+    // "../../x" or an absolute path from walking straight out of
+    // `assertion_dir`, which would point `node` (run with full access, no
+    // sandboxing — see crukx-runner's docs) at an arbitrary file to
+    // execute. Refuse instead of joining.
+    let assertion = if crukx_core::security::is_safe_path_segment(&contract.assertion_file) {
+        let assertion_file = assertion_dir.join(&contract.assertion_file);
+        run_assertion(&assertion_file, &assertion_context, cwd)
+    } else {
+        AssertResult {
+            pass: false,
+            reason: Some(format!(
+                "contract's assertion_file {:?} is not a safe path segment — refusing to run it",
+                contract.assertion_file
+            )),
+        }
+    };
 
     let trajectory_ok = steps.iter().all(|step| step.matched_expected);
     let decision = if trajectory_ok && assertion.pass {
@@ -137,6 +153,37 @@ mod tests {
         assert_eq!(outcome.decision, ReplayDecision::Pass);
         assert_eq!(outcome.steps.len(), 1);
         assert!(outcome.steps[0].matched_expected);
+    }
+
+    #[test]
+    fn traversal_assertion_file_is_refused_not_executed() {
+        let dir = tempfile::tempdir().unwrap();
+        // A real file outside `dir` that the traversal path would resolve
+        // to — if this test passed by *reading* it, the escape worked.
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join("payload.mjs"),
+            "export async function assert() { return { pass: true, reason: 'escaped' }; }",
+        )
+        .unwrap();
+        let traversal = format!(
+            "../{}/payload.mjs",
+            outside.path().file_name().unwrap().to_string_lossy()
+        );
+
+        let contract = RegressionContract {
+            schema_version: CONTRACT_SCHEMA_VERSION,
+            contract_id: "c1".to_string(),
+            created_at: "2026-08-22T00:00:00Z".to_string(),
+            source_session_id: "sess-1".to_string(),
+            source_event_file: "sess-1.jsonl".to_string(),
+            expected_trajectory: vec![],
+            assertion_file: traversal,
+        };
+
+        let outcome = replay_contract(&contract, dir.path(), "ci", dir.path());
+        assert_eq!(outcome.decision, ReplayDecision::Block);
+        assert_ne!(outcome.assertion.reason.as_deref(), Some("escaped"));
     }
 
     #[test]

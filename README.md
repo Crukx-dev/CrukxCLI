@@ -134,3 +134,21 @@ cargo test -p crukx-cli -p crukx-tui -p crukx-git
 Covers everything that ships in this repo: the CLI's command surface,
 terminal rendering, and git glue. The engine's own test suite runs in
 its private repo.
+
+## Security
+
+Found a vulnerability? See [SECURITY.md](./SECURITY.md) — don't file a
+public issue for it.
+
+## License
+
+Apache License 2.0 — see [LICENSE](./LICENSE). Covers everything in
+this repo (`crukx-cli`, `crukx-tui`, `crukx-git`, the npm shim): use
+it, fork it, ship it in a commercial product, all fine, and Apache 2.0's
+own patent grant + termination-on-litigation clause is exactly the
+protection that makes that safe for everyone building on it — it
+protects you from Crukx (and every other contributor) asserting a
+patent claim over code they contributed here, and it protects Crukx
+the same way against anyone else who contributes. It does not cover
+the private `crukx-core` engine this CLI depends on — that stays
+closed, unaffected by what this license permits.
