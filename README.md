@@ -52,6 +52,7 @@ All configured via `crukx.yml`, all optional:
 | `security_critical_delta_max` / `security_high_delta_max` | New security findings introduced by this change |
 | `p95_latency_max_ms` | P95 wall-clock time across replayed steps, from real timing |
 | per-contract `repeat: k` | pass^k — see above |
+| per-contract `escalation: {retry_cost, risk_value}` | On BLOCK: cost-aware ACCEPT/RETRY/ESCALATE, `p_failure` from this contract's own real run history |
 
 ## Tamper-evident by default
 
