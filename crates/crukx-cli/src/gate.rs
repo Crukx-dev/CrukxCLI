@@ -5,6 +5,9 @@ use crate::ui;
 use clap::ValueEnum;
 use crukx_core::contracts::replay::{ReplayDecision, ReplayOutcome};
 use crukx_core::contracts::schema::RegressionContract;
+use crukx_core::escalation::{
+    decide_escalation, historical_p_failure, EscalationAction, EscalationInput,
+};
 use crukx_core::evidence::{build_evidence_graph, summarize_root_cause};
 use crukx_core::policy::consistency::pass_k_lower_bound;
 use crukx_core::policy::{
@@ -16,7 +19,7 @@ use crukx_storage::evaluators::{read_judge_baseline, read_judge_current};
 use crukx_storage::evidence::write_evidence_graph;
 use crukx_storage::policy_file::load_policy;
 use crukx_storage::runs::{
-    append_run, read_last_green_gate, RunContractSummary, RunRecord,
+    append_run, contract_history, read_last_green_gate, RunContractSummary, RunRecord,
 };
 use crukx_storage::security::{read_security_after, read_security_before};
 use crukx_storage::state_dir::StateDir;
@@ -50,6 +53,10 @@ struct ContractVerdict {
     /// Wilson 95% lower bound on the observed pass rate — the honest
     /// floor. Present only for repeated contracts.
     ci_floor: Option<f64>,
+    /// Cost-aware ACCEPT/RETRY/ESCALATE, present only when this BLOCKed
+    /// contract's `crukx.yml` entry configured `escalation:` — fed from
+    /// this contract's own real `.crukx/runs.jsonl` history, not a guess.
+    escalation: Option<(EscalationAction, f64)>,
 }
 
 struct GateReportSnapshot {
@@ -180,9 +187,31 @@ pub fn run_gate(
         let evidence_path = if outcome.decision == ReplayDecision::Block {
             let graph = build_evidence_graph(&contract, &outcome);
             match write_evidence_graph(&state, &entry.id, &graph) {
-                Ok(()) => Some(state.evidence_dir().join(format!("{entry_id}.json", entry_id = entry.id))),
+                Ok(()) => Some(
+                    state
+                        .evidence_dir()
+                        .join(format!("{entry_id}.json", entry_id = entry.id)),
+                ),
                 Err(_) => None,
             }
+        } else {
+            None
+        };
+
+        let escalation = if outcome.decision == ReplayDecision::Block {
+            entry.escalation.as_ref().map(|cfg| {
+                let history =
+                    contract_history(&state, &entry.id, cfg.history_window).unwrap_or_default();
+                let p_failure = historical_p_failure(&history);
+                let decision = decide_escalation(EscalationInput {
+                    p_failure,
+                    p_recovery_given_retry: passed_runs as f64 / repeat as f64,
+                    retry_cost: cfg.retry_cost,
+                    risk_value: cfg.risk_value,
+                    failure_threshold: cfg.failure_threshold,
+                });
+                (decision.action, p_failure)
+            })
         } else {
             None
         };
@@ -215,6 +244,7 @@ pub fn run_gate(
             } else {
                 None
             },
+            escalation,
         });
 
         raw_entries.push((entry.clone(), outcome));
@@ -263,14 +293,18 @@ pub fn run_gate(
     // Regression diff vs the last green run: "worse than last green?"
     // catches slow decay that absolute thresholds can't see.
     let last_green = read_last_green_gate(&state).unwrap_or(None);
-    let (regression_detected, regression_details) = diff_against_last_green(last_green.as_ref(), &verdicts, reliability.vtr);
+    let (regression_detected, regression_details) =
+        diff_against_last_green(last_green.as_ref(), &verdicts, reliability.vtr);
 
-    let gate_passed = gate.decision == GateDecision::Pass
-        && reliability.pass
-        && sla_violations.is_empty();
+    let gate_passed =
+        gate.decision == GateDecision::Pass && reliability.pass && sla_violations.is_empty();
     let overall_decision = if gate_passed { "PASS" } else { "BLOCKED" };
     let blocked_by_regression = fail_on_regression && regression_detected;
-    let exit_code = if gate_passed && !blocked_by_regression { 0 } else { 1 };
+    let exit_code = if gate_passed && !blocked_by_regression {
+        0
+    } else {
+        1
+    };
 
     record_run_history(
         &state,
@@ -389,7 +423,11 @@ fn render_human(
                     dots_fail = colors::red(&dots_fail, color),
                 );
             }
-            None => eprintln!("  [{mode}] {id}: {mark}", mode = verdict.mode_label, id = verdict.id),
+            None => eprintln!(
+                "  [{mode}] {id}: {mark}",
+                mode = verdict.mode_label,
+                id = verdict.id
+            ),
         }
 
         if verdict.decision == ReplayDecision::Block {
@@ -408,12 +446,27 @@ fn render_human(
                     colors::dim("evidence: unavailable this run", color)
                 );
             }
+            if let Some((action, p_failure)) = verdict.escalation {
+                let painted = match action {
+                    EscalationAction::Accept => colors::green("ACCEPT", color),
+                    EscalationAction::Retry => colors::yellow("RETRY", color),
+                    EscalationAction::Escalate => colors::red("ESCALATE", color),
+                };
+                eprintln!(
+                    "      {} {painted} (p_failure {p_failure:.2}, from its own run history)",
+                    colors::dim("escalation:", color)
+                );
+            }
         }
     }
 
     const METER_WIDTH: usize = 10;
     let vtr_meter = charts::bar_meter(reliability.vtr, 1.0, METER_WIDTH);
-    eprintln!("VTR                  {:.1}%  {}", reliability.vtr * 100.0, vtr_meter);
+    eprintln!(
+        "VTR                  {:.1}%  {}",
+        reliability.vtr * 100.0,
+        vtr_meter
+    );
     let coverage_meter = charts::bar_meter(reliability.diagnostic_coverage, 1.0, METER_WIDTH);
     eprintln!(
         "Diagnostic coverage  {:.1}%  {}",
@@ -452,7 +505,10 @@ fn render_human(
         eprintln!("  {}", colors::red(&format!("✕ {violation}"), color));
     }
     for detail in regression_details {
-        eprintln!("  {}", colors::yellow(&format!("↘ regression: {detail}"), color));
+        eprintln!(
+            "  {}",
+            colors::yellow(&format!("↘ regression: {detail}"), color)
+        );
     }
 
     let decision_painted = if decision == "PASS" {
@@ -493,17 +549,21 @@ fn print_failure_hint(
                 color
             )
         );
-    } else if sla_configured
-        && verdicts.iter().any(|v| v.ci_floor.is_some())
-    {
+    } else if sla_configured && verdicts.iter().any(|v| v.ci_floor.is_some()) {
         eprintln!(
             "{}",
-            ui::hint("an SLA floor was breached — add repeats or fix flakiness; see pass^k floors above", color)
+            ui::hint(
+                "an SLA floor was breached — add repeats or fix flakiness; see pass^k floors above",
+                color
+            )
         );
     } else if blocked_by_regression && !regression_details.is_empty() {
         eprintln!(
             "{}",
-            ui::hint("--fail-on-regression: fix the decay or re-baseline with a deliberate PASS run", color)
+            ui::hint(
+                "--fail-on-regression: fix the decay or re-baseline with a deliberate PASS run",
+                color
+            )
         );
     }
 }
@@ -536,7 +596,10 @@ impl GateReportSnapshot {
             diagnostic_coverage: reliability.diagnostic_coverage,
             p95_ms: reliability.p95_latency_ms,
             judge_drifted: reliability.judge_drift.as_ref().map(|d| d.drifted),
-            security_critical_delta: reliability.security_delta.as_ref().map(|d| d.critical_delta),
+            security_critical_delta: reliability
+                .security_delta
+                .as_ref()
+                .map(|d| d.critical_delta),
             security_high_delta: reliability.security_delta.as_ref().map(|d| d.high_delta),
             reliability_pass: reliability.pass,
         }
@@ -558,6 +621,14 @@ fn contract_to_json(v: &ContractVerdict) -> serde_json::Value {
             "k": k,
             "point_estimate": passed as f64 / k.max(1) as f64,
             "wilson_lower_95": v.ci_floor,
+        })),
+        "escalation": v.escalation.map(|(action, p_failure)| json!({
+            "action": match action {
+                EscalationAction::Accept => "accept",
+                EscalationAction::Retry => "retry",
+                EscalationAction::Escalate => "escalate",
+            },
+            "p_failure": p_failure,
         })),
     })
 }
@@ -642,14 +713,20 @@ fn print_junit_report(report: &GateReportSnapshot) {
             msg = xml_escape(&report.regression_details.join("; "))
         );
     } else {
-        println!("    <testcase name=\"regression-vs-last-green\" classname=\"crukx.reliability\"/>");
+        println!(
+            "    <testcase name=\"regression-vs-last-green\" classname=\"crukx.reliability\"/>"
+        );
     }
     println!("  </testsuite>");
     println!("</testsuites>");
 }
 
 fn print_markdown_report(report: &GateReportSnapshot) {
-    let icon = if report.decision == "PASS" { "✅" } else { "❌" };
+    let icon = if report.decision == "PASS" {
+        "✅"
+    } else {
+        "❌"
+    };
     println!("## Crukx gate: {icon} {}\n", report.decision);
     println!("| Contract | Mode | Result | pass^k | Floor (Wilson 95%) |");
     println!("|---|---|---|---|---|");
