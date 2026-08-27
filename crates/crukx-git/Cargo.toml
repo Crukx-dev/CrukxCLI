@@ -1,0 +1,11 @@
+[package]
+name = "crukx-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

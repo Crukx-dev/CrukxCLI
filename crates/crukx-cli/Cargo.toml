@@ -1,0 +1,29 @@
+[package]
+name = "crukx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "crukx"
+path = "src/main.rs"
+
+[dependencies]
+# crukx-core / crukx-storage / crukx-runner are the reliability-gating
+# engine — kept in a private repo, not published here. Building this
+# binary requires access to https://github.com/Crukx-dev/crukx-core
+# (org members only). Everyone else: grab a released binary instead of
+# building from source (see README).
+crukx-core = { git = "https://github.com/Crukx-dev/crukx-core", branch = "main" }
+crukx-git = { path = "../crukx-git" }
+crukx-runner = { git = "https://github.com/Crukx-dev/crukx-core", branch = "main" }
+crukx-storage = { git = "https://github.com/Crukx-dev/crukx-core", branch = "main" }
+crukx-tui = { path = "../crukx-tui" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
+serde_json.workspace = true
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+assert_cmd = "2"

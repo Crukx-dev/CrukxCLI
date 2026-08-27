@@ -1,0 +1,11 @@
+[package]
+name = "crukx-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+crukx-core = { git = "https://github.com/Crukx-dev/crukx-core", branch = "main" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+ratatui = "0.29"
+crossterm = "0.28"
