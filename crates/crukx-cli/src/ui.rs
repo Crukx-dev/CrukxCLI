@@ -37,6 +37,20 @@ pub fn warn_mark(enabled: bool) -> String {
     colors::yellow("!", enabled)
 }
 
+/// Dim secondary text — metadata, counts, context lines.
+pub fn dim_label(text: &str, enabled: bool) -> String {
+    colors::dim(text, enabled)
+}
+
+/// `── Title ──────────` style section rule for dashboards.
+pub fn section(title: &str, enabled: bool) -> String {
+    format!(
+        "{} {}",
+        colors::bold(title, enabled),
+        colors::dim(&"─".repeat(24), enabled)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

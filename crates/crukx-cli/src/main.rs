@@ -8,8 +8,11 @@ mod banner;
 mod capture;
 mod charts;
 mod colors;
+mod doctor;
 mod gate;
 mod history;
+mod judge;
+mod landing;
 mod replay;
 mod review;
 mod run;
@@ -18,6 +21,7 @@ mod ui;
 mod verify_session;
 
 use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use crukx_core::events::AgentAdapter;
 use std::path::PathBuf;
 
@@ -94,24 +98,54 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Check the local install: binary, git, assertion runtime, state dir,
+    /// repository context, API key. Exit 0 = healthy.
+    Doctor,
+    /// Run an LLM judge over a human-labeled calibration set and record
+    /// its agreement rate. Ship with `--baseline` once; re-run after any
+    /// judge/model change so `crukx gate` can detect drift.
+    Judge {
+        /// Shipped model profile — mimo (Xiaomi MiMo v2.5, default) or
+        /// glm (GLM-5.3-Flash via OpenRouter).
+        #[arg(long, value_enum)]
+        profile: Option<judge::JudgeProfile>,
+        /// Override the model id (any compatible model works).
+        #[arg(long)]
+        model: Option<String>,
+        /// Override the base URL (defaults chosen by --profile).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// JSONL calibration set: {"input": "...", "expected": true|false} per line.
+        #[arg(long)]
+        calibration: PathBuf,
+        /// Record this run as the calibration baseline instead of `current`.
+        #[arg(long)]
+        baseline: bool,
+    },
+    /// Print shell completion script (bash, zsh, fish, powershell) —
+    /// source it from your rc: `crukx completion bash >> ~/.bashrc`.
+    Completion {
+        #[arg(long, value_enum)]
+        shell: Shell,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
 
     let Some(command) = cli.command else {
-        // Bare `crukx`, nothing after it — the same first-impression
-        // moment `claude`/`gh`/`docker` give you. Every other invocation
-        // (including `--help`, which clap intercepts before this point)
-        // stays plain and script-safe.
-        print!(
-            "{}",
-            banner::render(env!("CARGO_PKG_VERSION"), colors::color_enabled())
-        );
-        println!();
-        Cli::command().print_help().ok();
-        println!();
-        std::process::exit(2);
+        // Bare `crukx` is the "open the app" moment. In a project with
+        // local state it's a status dashboard; anywhere else it's the
+        // onboarding banner + help (exit 2, script-safe: no --help flag
+        // or explicit subcommand was given).
+        let cwd = std::env::current_dir().expect("failed to read current directory");
+        let code = landing::run_landing(&cwd);
+        if code != 0 {
+            println!();
+            Cli::command().print_help().ok();
+            println!();
+        }
+        std::process::exit(code);
     };
 
     let cwd = std::env::current_dir().expect("failed to read current directory");
@@ -158,6 +192,18 @@ fn main() {
             verify_session::run_verify_session(&session_id, &cwd)
         }
         Command::History { last, json } => history::run_history(last, json, &cwd),
+        Command::Doctor => doctor::run_doctor(&cwd),
+        Command::Judge {
+            profile,
+            model,
+            base_url,
+            calibration,
+            baseline,
+        } => judge::run_judge(profile, model, base_url, &calibration, baseline, &cwd),
+        Command::Completion { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "crukx", &mut std::io::stdout());
+            0
+        }
     };
 
     std::process::exit(exit_code);
