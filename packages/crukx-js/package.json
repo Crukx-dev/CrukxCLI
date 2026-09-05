@@ -1,7 +1,7 @@
 {
   "name": "@crukx/cli-rs",
   "version": "0.1.0-alpha.0",
-  "description": "Crukx CLI (Rust) — release-gate for AI-written software. Preview package: requires a local cargo build of crukx-rs until prebuilt binaries ship. See README.md.",
+  "description": "Crukx CLI (Rust) — release-gate for AI-written software. Fetches prebuilt binaries from GitHub Releases, falls back to local cargo build.",
   "bin": {
     "crukx-rs": "bin/crukx.js"
   },

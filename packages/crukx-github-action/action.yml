@@ -1,0 +1,89 @@
+name: "Crukx Release Gate"
+description: "Run crukx gate to block releases when reliability, security, latency, or consistency constraints aren't met."
+author: "crukx"
+
+inputs:
+  version:
+    description: "Version of crukx to install (default: latest)"
+    required: false
+    default: "latest"
+  policy:
+    description: "Path to crukx.yml policy file"
+    required: false
+    default: "crukx.yml"
+  format:
+    description: "Output format (junit, markdown, json)"
+    required: false
+    default: "markdown"
+  fail-on-regression:
+    description: "Exit 1 on regression vs last green gate"
+    required: false
+    default: "true"
+
+outputs:
+  decision:
+    description: "Gate decision (PASS or BLOCK)"
+    value: ${{ steps.gate.outputs.decision }}
+  vtr:
+    description: "Verified Trust Rate"
+    value: ${{ steps.gate.outputs.vtr }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install crukx
+      id: install
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(curl -s "https://api.github.com/repos/crukx/crukx-rs/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+        fi
+
+        PLATFORM=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+
+        case "$PLATFORM" in
+          linux) PLATFORM="unknown-linux-gnu" ;;
+          darwin) PLATFORM="apple-darwin" ;;
+          *) echo "Unsupported platform: $PLATFORM"; exit 1 ;;
+        esac
+
+        case "$ARCH" in
+          x86_64) ARCH="x86_64" ;;
+          aarch64|arm64) ARCH="aarch64" ;;
+          *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+        esac
+
+        TARGET="${ARCH}-${PLATFORM}"
+        ARCHIVE="crukx-${TARGET}.tar.gz"
+        URL="https://github.com/crukx/crukx-rs/releases/download/${VERSION}/${ARCHIVE}"
+
+        echo "Downloading crukx ${VERSION} for ${TARGET}..."
+        curl -fsSL "$URL" -o "$ARCHIVE"
+        tar xzf "$ARCHIVE"
+        chmod +x crukx
+
+        echo "$PWD" >> "$GITHUB_PATH"
+
+    - name: Run crukx gate
+      id: gate
+      shell: bash
+      run: |
+        ARGS=("gate" "--policy" "${{ inputs.policy }}" "--format" "${{ inputs.format }}")
+
+        if [ "${{ inputs.fail-on-regression }}" = "true" ]; then
+          ARGS+=("--fail-on-regression")
+        fi
+
+        OUTPUT=$(crukx "${ARGS[@]}" 2>&1) || true
+        echo "$OUTPUT"
+
+        if echo "$OUTPUT" | grep -q "BLOCK"; then
+          echo "decision=BLOCK" >> "$GITHUB_OUTPUT"
+          echo "::error::Gate BLOCKED — release blocked by crukx"
+          exit 1
+        else
+          echo "decision=PASS" >> "$GITHUB_OUTPUT"
+          echo "::notice::Gate PASSED — release approved by crukx"
+        fi
