@@ -21,6 +21,7 @@ mod run;
 mod run_replay;
 mod ui;
 mod verify_session;
+mod worker;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
@@ -161,6 +162,22 @@ enum Command {
         /// Print the packaging result as JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Poll the control plane for benchmark jobs, run them on this
+    /// machine, and report results back. The remote half of B6.
+    Worker {
+        /// Control-plane base URL, e.g. https://crukx-cloud.vercel.app.
+        #[arg(long)]
+        api_url: String,
+        /// API key (falls back to CRUKX_API_KEY).
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Seconds between claim polls.
+        #[arg(long, default_value_t = 10)]
+        poll_secs: u64,
+        /// Claim at most one job, then exit.
+        #[arg(long)]
+        once: bool,
     },
     /// Run an LLM judge over a human-labeled calibration set and record
     /// its agreement rate. Ship with `--baseline` once; re-run after any
@@ -305,6 +322,17 @@ fn main() {
             clap_complete::generate(shell, &mut Cli::command(), "crukx", &mut std::io::stdout());
             0
         }
+        Command::Worker {
+            api_url,
+            api_key,
+            poll_secs,
+            once,
+        } => worker::run_worker(&worker::WorkerArgs {
+            api_url,
+            api_key,
+            poll_secs,
+            once,
+        }),
     };
 
     std::process::exit(exit_code);
