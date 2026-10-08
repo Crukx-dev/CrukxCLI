@@ -5,9 +5,11 @@
 
 mod assertion;
 mod banner;
+mod benchmark;
 mod capture;
 mod charts;
 mod colors;
+mod deploy;
 mod doctor;
 mod gate;
 mod history;
@@ -101,6 +103,65 @@ enum Command {
     /// Check the local install: binary, git, assertion runtime, state dir,
     /// repository context, API key. Exit 0 = healthy.
     Doctor,
+    /// Benchmark a GGUF model on this machine: detect the device, resolve
+    /// the runtime, warm up, run N measured executions, report latency.
+    Benchmark {
+        /// Path to the model file to execute.
+        model: PathBuf,
+        /// Prompt sent on every measured run.
+        #[arg(long, default_value = "benchmark")]
+        prompt: String,
+        /// Measured executions (warm-up runs are extra).
+        #[arg(long, default_value_t = 5)]
+        runs: u32,
+        /// Unmeasured warm-up executions.
+        #[arg(long, default_value_t = 1)]
+        warmup: u32,
+        /// Max tokens per execution.
+        #[arg(long, default_value_t = 32)]
+        max_tokens: u32,
+        /// Per-execution timeout in seconds.
+        #[arg(long, default_value_t = 120)]
+        timeout_secs: u64,
+        /// Print the full benchmark report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Package a benchmarked candidate into a Crukx artifact. The
+    /// verification verdict always comes from a verifier-produced file —
+    /// never from flags — so a REJECT can never become a release here.
+    Deploy {
+        /// Benchmark report JSON from `crukx benchmark --json`.
+        #[arg(long)]
+        report: PathBuf,
+        /// Model identity, e.g. Qwen/Qwen3-4B.
+        #[arg(long)]
+        model: String,
+        /// Source hash the candidate was built from.
+        #[arg(long)]
+        source_hash: String,
+        /// Workload the candidate was verified against.
+        #[arg(long)]
+        workload: String,
+        /// Optimization transform that produced the candidate.
+        #[arg(long)]
+        transform: String,
+        /// Optional JSON file with the transform config.
+        #[arg(long)]
+        transform_config: Option<String>,
+        /// Verifier-produced verification record JSON.
+        #[arg(long)]
+        verification: PathBuf,
+        /// Measured tokens/sec, when known from the benchmark.
+        #[arg(long)]
+        tok_s: Option<f64>,
+        /// Directory the artifact package is written to.
+        #[arg(long, default_value = ".crukx-artifact")]
+        out: PathBuf,
+        /// Print the packaging result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run an LLM judge over a human-labeled calibration set and record
     /// its agreement rate. Ship with `--baseline` once; re-run after any
     /// judge/model change so `crukx gate` can detect drift.
@@ -193,6 +254,46 @@ fn main() {
         }
         Command::History { last, json } => history::run_history(last, json, &cwd),
         Command::Doctor => doctor::run_doctor(&cwd),
+        Command::Benchmark {
+            model,
+            prompt,
+            runs,
+            warmup,
+            max_tokens,
+            timeout_secs,
+            json,
+        } => benchmark::run_benchmark(&benchmark::BenchmarkArgs {
+            model,
+            prompt,
+            runs,
+            warmup,
+            max_tokens,
+            timeout_secs,
+            json,
+        }),
+        Command::Deploy {
+            report,
+            model,
+            source_hash,
+            workload,
+            transform,
+            transform_config,
+            verification,
+            tok_s,
+            out,
+            json,
+        } => deploy::run_deploy(&deploy::DeployArgs {
+            report,
+            model,
+            source_hash,
+            workload,
+            transform,
+            transform_config,
+            verification,
+            throughput_tok_s: tok_s,
+            out,
+            json,
+        }),
         Command::Judge {
             profile,
             model,
