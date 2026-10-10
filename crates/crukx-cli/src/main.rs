@@ -20,6 +20,7 @@ mod review;
 mod run;
 mod run_replay;
 mod ui;
+mod verify_artifact;
 mod verify_session;
 mod worker;
 
@@ -92,6 +93,12 @@ enum Command {
     },
     /// Verify a session's event log is untampered since `crukx run` recorded it.
     VerifySession { session_id: String },
+    /// Verify a packaged artifact: manifest hash matches its contents,
+    /// evidence bundle is present and readable.
+    VerifyArtifact {
+        /// Artifact package directory from `crukx deploy`.
+        dir: PathBuf,
+    },
     /// Chart VTR/P95 trends from recent gate/replay runs.
     History {
         /// How many of the most recent runs to show.
@@ -268,6 +275,9 @@ fn main() {
         Command::Review { session_id } => review::run_review(&session_id, &cwd),
         Command::VerifySession { session_id } => {
             verify_session::run_verify_session(&session_id, &cwd)
+        }
+        Command::VerifyArtifact { dir } => {
+            verify_artifact::run_verify_artifact(&verify_artifact::VerifyArtifactArgs { dir })
         }
         Command::History { last, json } => history::run_history(last, json, &cwd),
         Command::Doctor => doctor::run_doctor(&cwd),
