@@ -17,6 +17,7 @@ mod history;
 mod judge;
 mod landing;
 mod replay;
+mod report;
 mod review;
 mod run;
 mod run_replay;
@@ -181,6 +182,28 @@ enum Command {
         /// Print the comparison as JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Render the alpha evidence report for a packaged artifact:
+    /// candidates, rejections with reasons, selection, repro steps.
+    Report {
+        /// Artifact package directory from `crukx deploy`.
+        #[arg(long)]
+        artifact: PathBuf,
+        /// JSON file with the candidate stats under comparison.
+        #[arg(long)]
+        candidates: PathBuf,
+        /// Quality-regression cap, e.g. 0.0025 for 0.25%.
+        #[arg(long, default_value_t = 0.0025)]
+        max_regression: f64,
+        /// Memory ceiling in MB.
+        #[arg(long)]
+        max_memory_mb: Option<u64>,
+        /// Throughput floor in tokens/sec.
+        #[arg(long)]
+        min_tok_s: Option<f64>,
+        /// Where to write REPORT.md (defaults to <artifact>/REPORT.md).
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     /// Poll the control plane for benchmark jobs, run them on this
     /// machine, and report results back. The remote half of B6.
@@ -347,6 +370,21 @@ fn main() {
         Command::Compare { a, b, json } => {
             compare::run_compare(&compare::CompareArgs { a, b, json })
         }
+        Command::Report {
+            artifact,
+            candidates,
+            max_regression,
+            max_memory_mb,
+            min_tok_s,
+            out,
+        } => report::run_report(&report::ReportArgs {
+            artifact,
+            candidates,
+            max_regression,
+            max_memory_mb,
+            min_tok_s,
+            out,
+        }),
         Command::Worker {
             api_url,
             api_key,
