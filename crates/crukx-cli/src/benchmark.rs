@@ -16,10 +16,7 @@ pub struct BenchmarkArgs {
 
 pub fn run_benchmark(args: &BenchmarkArgs) -> i32 {
     if !args.model.is_file() {
-        eprintln!(
-            "benchmark: model file not found: {}",
-            args.model.display()
-        );
+        eprintln!("benchmark: model file not found: {}", args.model.display());
         return 2;
     }
     if args.runs == 0 {
@@ -41,12 +38,7 @@ pub fn run_benchmark(args: &BenchmarkArgs) -> i32 {
         max_tokens: args.max_tokens,
         timeout_secs: args.timeout_secs,
     };
-    let report = match benchmark(
-        &adapter,
-        &profile,
-        &args.model.to_string_lossy(),
-        &config,
-    ) {
+    let report = match benchmark(&adapter, &profile, &args.model.to_string_lossy(), &config) {
         Ok(report) => report,
         Err(e) => {
             eprintln!("benchmark: run failed: {}", e);

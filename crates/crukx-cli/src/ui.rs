@@ -62,7 +62,10 @@ mod tests {
 
     #[test]
     fn header_with_context_appends_separator() {
-        assert_eq!(header("history", Some("last 5"), false), "◆ history · last 5");
+        assert_eq!(
+            header("history", Some("last 5"), false),
+            "◆ history · last 5"
+        );
     }
 
     #[test]

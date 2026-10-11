@@ -32,7 +32,11 @@ pub fn run_deploy(args: &DeployArgs) -> i32 {
     let report: BenchmarkReport = match serde_json::from_str(&report_text) {
         Ok(report) => report,
         Err(e) => {
-            eprintln!("deploy: {} is not a benchmark report: {}", args.report.display(), e);
+            eprintln!(
+                "deploy: {} is not a benchmark report: {}",
+                args.report.display(),
+                e
+            );
             return 2;
         }
     };
@@ -130,8 +134,16 @@ pub fn run_deploy(args: &DeployArgs) -> i32 {
         println!("evidence: {}", exported.evidence_path.display());
         println!(
             "verdict:  {}",
-            if releasable { "RELEASABLE" } else { "NOT RELEASABLE (verification did not pass)" }
+            if releasable {
+                "RELEASABLE"
+            } else {
+                "NOT RELEASABLE (verification did not pass)"
+            }
         );
     }
-    if releasable { 0 } else { 1 }
+    if releasable {
+        0
+    } else {
+        1
+    }
 }

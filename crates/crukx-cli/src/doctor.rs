@@ -31,11 +31,7 @@ pub fn run_doctor(cwd: &Path) -> i32 {
         name: "crukx binary",
         critical: true,
         passed: true,
-        detail: format!(
-            "{} · {}",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS
-        ),
+        detail: format!("{} · {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS),
     });
 
     // Git: sessions capture repository state.
@@ -58,7 +54,13 @@ pub fn run_doctor(cwd: &Path) -> i32 {
     // Node-compatible runtime: assertion files are .mjs.
     let node_ok = ["node", "bun", "deno"]
         .iter()
-        .find(|bin| Command::new(bin).arg("--version").output().map(|o| o.status.success()).unwrap_or(false))
+        .find(|bin| {
+            Command::new(bin)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
         .copied();
     checks.push(Check {
         name: "assertion runtime (.mjs)",
@@ -66,7 +68,10 @@ pub fn run_doctor(cwd: &Path) -> i32 {
         passed: node_ok.is_some(),
         detail: match node_ok {
             Some(bin) => format!("{bin} found"),
-            None => "no node/bun/deno — JS assertions can't run (shell trajectory checks still work)".into(),
+            None => {
+                "no node/bun/deno — JS assertions can't run (shell trajectory checks still work)"
+                    .into()
+            }
         },
     });
 
@@ -79,7 +84,15 @@ pub fn run_doctor(cwd: &Path) -> i32 {
         name: "state dir",
         critical: true,
         passed: state_writable,
-        detail: format!("{} {}", state.root().display(), if state_writable { "writable" } else { "NOT writable" }),
+        detail: format!(
+            "{} {}",
+            state.root().display(),
+            if state_writable {
+                "writable"
+            } else {
+                "NOT writable"
+            }
+        ),
     });
 
     // Repo context.
@@ -122,7 +135,11 @@ pub fn run_doctor(cwd: &Path) -> i32 {
         } else {
             ui::warn_mark(color)
         };
-        println!("  {mark} {:<28} {}", check.name, ui::dim_label(&check.detail, color));
+        println!(
+            "  {mark} {:<28} {}",
+            check.name,
+            ui::dim_label(&check.detail, color)
+        );
     }
 
     let critical_failed = checks.iter().filter(|c| c.critical && !c.passed).count();
@@ -130,7 +147,10 @@ pub fn run_doctor(cwd: &Path) -> i32 {
     if critical_failed > 0 {
         println!(
             "{}",
-            colors::bold(&format!("doctor: {critical_failed} critical check(s) failed"), color)
+            colors::bold(
+                &format!("doctor: {critical_failed} critical check(s) failed"),
+                color
+            )
         );
         1
     } else {

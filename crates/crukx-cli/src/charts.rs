@@ -14,10 +14,7 @@ pub fn sparkline(values: &[f64]) -> String {
         return String::new();
     }
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = values
-        .iter()
-        .copied()
-        .fold(f64::NEG_INFINITY, f64::max);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     if (max - min).abs() < f64::EPSILON {
         return "▄".repeat(values.len());
     }
@@ -49,10 +46,7 @@ pub fn bar_meter(value: f64, max: f64, width: usize) -> String {
 /// *bytes* and would panic mid-glyph, hence no single-string variant.
 pub fn pass_dots_split(passed: usize, total: usize) -> (String, String) {
     let passed = passed.min(total);
-    (
-        "●".repeat(passed),
-        "○".repeat(total.saturating_sub(passed)),
-    )
+    ("●".repeat(passed), "○".repeat(total.saturating_sub(passed)))
 }
 
 #[cfg(test)]

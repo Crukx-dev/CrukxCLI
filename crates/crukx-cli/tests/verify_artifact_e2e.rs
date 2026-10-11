@@ -63,8 +63,14 @@ fn deploy_then_verify_artifact_round_trip() {
     let verify = run(&["verify-artifact", out.to_str().unwrap()]);
     assert_eq!(verify.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&verify.stdout);
-    assert!(stdout.contains("RELEASABLE"), "unexpected stdout:\n{stdout}");
-    assert!(stdout.contains("Fixture/Model"), "unexpected stdout:\n{stdout}");
+    assert!(
+        stdout.contains("RELEASABLE"),
+        "unexpected stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Fixture/Model"),
+        "unexpected stdout:\n{stdout}"
+    );
 }
 
 #[test]

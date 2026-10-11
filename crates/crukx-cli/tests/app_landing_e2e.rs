@@ -36,9 +36,16 @@ fn bare_crukx_in_fresh_directory_is_onboarding_exit_two() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(2), "fresh dir keeps exit 2 contract");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "fresh dir keeps exit 2 contract"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Release gate for AI-written software"), "{stdout}");
+    assert!(
+        stdout.contains("Release gate for AI-written software"),
+        "{stdout}"
+    );
     assert!(stdout.contains("Commands:"), "help still prints: {stdout}");
 }
 

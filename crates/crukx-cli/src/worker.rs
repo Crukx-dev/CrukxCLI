@@ -34,10 +34,7 @@ fn claim_job(api_url: &str, key: &str) -> Result<Option<serde_json::Value>, Stri
     if response.status() == 204 {
         return Ok(None);
     }
-    response
-        .into_json()
-        .map(Some)
-        .map_err(|e| e.to_string())
+    response.into_json().map(Some).map_err(|e| e.to_string())
 }
 
 fn patch_job(
@@ -57,7 +54,10 @@ fn patch_job(
 }
 
 fn payload_string(payload: &serde_json::Value, key: &str) -> Option<String> {
-    payload.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn payload_u32(payload: &serde_json::Value, key: &str, default: u32) -> u32 {
@@ -69,10 +69,7 @@ fn payload_u32(payload: &serde_json::Value, key: &str, default: u32) -> u32 {
 }
 
 fn payload_u64(payload: &serde_json::Value, key: &str, default: u64) -> u64 {
-    payload
-        .get(key)
-        .and_then(|v| v.as_u64())
-        .unwrap_or(default)
+    payload.get(key).and_then(|v| v.as_u64()).unwrap_or(default)
 }
 
 fn run_claimed_job(job: &serde_json::Value) -> (String, serde_json::Value) {
@@ -81,7 +78,10 @@ fn run_claimed_job(job: &serde_json::Value) -> (String, serde_json::Value) {
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
-    let payload = job.get("payload").cloned().unwrap_or(serde_json::Value::Null);
+    let payload = job
+        .get("payload")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let model = match payload_string(&payload, "model") {
         Some(model) => model,
         None => {
@@ -101,7 +101,10 @@ fn run_claimed_job(job: &serde_json::Value) -> (String, serde_json::Value) {
     let adapter = match resolve_adapter(&profile) {
         Ok(adapter) => adapter,
         Err(e) => {
-            return (job_id, serde_json::json!({"error": format!("no usable runtime: {}", e)}));
+            return (
+                job_id,
+                serde_json::json!({"error": format!("no usable runtime: {}", e)}),
+            );
         }
     };
     let config = BenchmarkConfig {
@@ -122,13 +125,9 @@ fn run_claimed_job(job: &serde_json::Value) -> (String, serde_json::Value) {
 }
 
 fn report_is_usable(result: &serde_json::Value) -> bool {
-    result.get("error").is_none()
-        && result
-            .get("summary")
-            .is_some_and(|s| !s.is_null())
-        && {
-            serde_json::from_value::<BenchmarkReport>(result.clone()).is_ok()
-        }
+    result.get("error").is_none() && result.get("summary").is_some_and(|s| !s.is_null()) && {
+        serde_json::from_value::<BenchmarkReport>(result.clone()).is_ok()
+    }
 }
 
 pub fn run_worker(args: &WorkerArgs) -> i32 {

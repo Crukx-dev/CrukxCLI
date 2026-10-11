@@ -88,7 +88,10 @@ pub fn run_judge(
     let cases = match read_calibration(calibration_path) {
         Ok(cases) => cases,
         Err(err) => {
-            eprintln!("Crukx judge: failed to read calibration set {}: {err}", calibration_path.display());
+            eprintln!(
+                "Crukx judge: failed to read calibration set {}: {err}",
+                calibration_path.display()
+            );
             return 1;
         }
     };
@@ -99,7 +102,10 @@ pub fn run_judge(
         );
         eprintln!(
             "{}",
-            ui::hint("each line is a JSON object {\"input\": \"...\", \"expected\": true|false}", color)
+            ui::hint(
+                "each line is a JSON object {\"input\": \"...\", \"expected\": true|false}",
+                color
+            )
         );
         return 1;
     }
@@ -129,10 +135,14 @@ pub fn run_judge(
                 } else {
                     ui::fail_mark(color)
                 };
-                println!("  {mark} case {}/{} — {} (expected {})",
+                println!(
+                    "  {mark} case {}/{} — {} (expected {})",
                     index + 1,
                     cases.len(),
-                    colors::dim(&format!("judge said {}", if verdict { "PASS" } else { "FAIL" }), color),
+                    colors::dim(
+                        &format!("judge said {}", if verdict { "PASS" } else { "FAIL" }),
+                        color
+                    ),
                     if case.expected { "PASS" } else { "FAIL" },
                 );
                 if verdict == case.expected {
@@ -171,7 +181,11 @@ pub fn run_judge(
     };
 
     let state = StateDir::resolve(cwd);
-    let target = if as_baseline { "baseline.json" } else { "current.json" };
+    let target = if as_baseline {
+        "baseline.json"
+    } else {
+        "current.json"
+    };
     if let Err(err) = write_json(&state.evaluators_dir().join(target), &record) {
         eprintln!("Crukx judge: failed to write {target}: {err}");
         return 1;
@@ -213,8 +227,7 @@ fn read_calibration(path: &Path) -> Result<Vec<CalibrationCase>, String> {
             continue;
         }
         cases.push(
-            serde_json::from_str(line)
-                .map_err(|err| format!("line {}: {err}", line_no + 1))?,
+            serde_json::from_str(line).map_err(|err| format!("line {}: {err}", line_no + 1))?,
         );
     }
     Ok(cases)
@@ -276,7 +289,9 @@ fn call_anthropic(base_url: &str, api_key: &str, model: &str, prompt: &str) -> O
                 return Some(text);
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(1500 * (attempt as u64 + 1)));
+        std::thread::sleep(std::time::Duration::from_millis(
+            1500 * (attempt as u64 + 1),
+        ));
     }
     None
 }
@@ -370,8 +385,14 @@ mod tests {
 
     #[test]
     fn extract_pass_from_clean_json() {
-        assert_eq!(extract_pass("{\"pass\": true, \"reason\": \"ok\"}"), Some(true));
-        assert_eq!(extract_pass("{\"pass\": false, \"reason\": \"no\"}"), Some(false));
+        assert_eq!(
+            extract_pass("{\"pass\": true, \"reason\": \"ok\"}"),
+            Some(true)
+        );
+        assert_eq!(
+            extract_pass("{\"pass\": false, \"reason\": \"no\"}"),
+            Some(false)
+        );
     }
 
     #[test]

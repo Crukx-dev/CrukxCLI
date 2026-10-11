@@ -9,6 +9,7 @@ mod benchmark;
 mod capture;
 mod charts;
 mod colors;
+mod compare;
 mod deploy;
 mod doctor;
 mod gate;
@@ -167,6 +168,17 @@ enum Command {
         #[arg(long, default_value = ".crukx-artifact")]
         out: PathBuf,
         /// Print the packaging result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare two benchmark reports: latency deltas with a
+    /// same-device guard so cross-hardware numbers can't mislead.
+    Compare {
+        /// First report (the baseline A).
+        a: PathBuf,
+        /// Second report (the challenger B).
+        b: PathBuf,
+        /// Print the comparison as JSON.
         #[arg(long)]
         json: bool,
     },
@@ -331,6 +343,9 @@ fn main() {
         Command::Completion { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "crukx", &mut std::io::stdout());
             0
+        }
+        Command::Compare { a, b, json } => {
+            compare::run_compare(&compare::CompareArgs { a, b, json })
         }
         Command::Worker {
             api_url,

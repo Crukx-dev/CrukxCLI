@@ -67,7 +67,10 @@ pub fn run_history(last: usize, json: bool, cwd: &Path) -> i32 {
         color,
     );
 
-    let p95s: Vec<Option<f64>> = records.iter().map(|r| r.p95_ms.map(|ms| ms as f64)).collect();
+    let p95s: Vec<Option<f64>> = records
+        .iter()
+        .map(|r| r.p95_ms.map(|ms| ms as f64))
+        .collect();
     if p95s.iter().any(|p| p.is_some()) {
         print_metric_strip("P95 ", &series_filled(&p95s), format_ms, false, color);
     }
@@ -90,15 +93,21 @@ fn series_filled(values: &[Option<f64>]) -> Vec<f64> {
 
 /// One sparkline strip with latest value and direction. `higher_is_better`
 /// picks which end of the ramp counts as an improvement for the arrow.
-fn print_metric_strip(label: &str, values: &[f64], fmt: impl Fn(f64) -> String, higher_is_better: bool, color: bool) {
+fn print_metric_strip(
+    label: &str,
+    values: &[f64],
+    fmt: impl Fn(f64) -> String,
+    higher_is_better: bool,
+    color: bool,
+) {
     if values.is_empty() {
         return;
     }
     let spark = charts::sparkline(values);
     let latest = values[values.len() - 1];
     let trend = if values.len() >= 2 {
-        let earlier: f64 = values[..values.len() - 1].iter().sum::<f64>()
-            / (values.len() - 1) as f64;
+        let earlier: f64 =
+            values[..values.len() - 1].iter().sum::<f64>() / (values.len() - 1) as f64;
         let improved = if higher_is_better {
             latest > earlier
         } else {

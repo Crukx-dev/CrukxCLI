@@ -120,7 +120,13 @@ pub fn run_replay(contract_id: &str, candidate_label: &str, repeat: usize, cwd: 
     // flakiness should be visible as shape, not just a number.
     let latencies: Vec<f64> = outcomes
         .iter()
-        .map(|outcome| outcome.steps.iter().map(|step| step.duration_ms).sum::<u64>() as f64)
+        .map(|outcome| {
+            outcome
+                .steps
+                .iter()
+                .map(|step| step.duration_ms)
+                .sum::<u64>() as f64
+        })
         .collect();
     eprintln!(
         "  latency {}",
@@ -148,7 +154,13 @@ pub fn run_replay(contract_id: &str, candidate_label: &str, repeat: usize, cwd: 
         )
     );
 
-    record_history(&state, &contract.contract_id, &decisions, &outcomes, exit_code_from(consistent));
+    record_history(
+        &state,
+        &contract.contract_id,
+        &decisions,
+        &outcomes,
+        exit_code_from(consistent),
+    );
 
     exit_code_from(consistent)
 }
@@ -199,13 +211,21 @@ fn record_history(
     let record = RunRecord {
         ts: chrono::Utc::now().to_rfc3339(),
         command: "replay".to_string(),
-        decision: if all_passed { "PASS".into() } else { "BLOCKED".into() },
+        decision: if all_passed {
+            "PASS".into()
+        } else {
+            "BLOCKED".into()
+        },
         vtr: None,
         diagnostic_coverage: None,
         p95_ms,
         contracts: vec![RunContractSummary {
             id: contract_id.to_string(),
-            decision: if all_passed { "PASS".into() } else { "BLOCK".into() },
+            decision: if all_passed {
+                "PASS".into()
+            } else {
+                "BLOCK".into()
+            },
             passed: (k > 1).then_some(passed),
             k: (k > 1).then_some(k),
         }],

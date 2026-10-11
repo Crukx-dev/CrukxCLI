@@ -21,7 +21,10 @@ fn worker_without_key_exits_2() {
     let output = run(&["worker", "--api-url", "http://127.0.0.1:9"]);
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("missing API key"), "unexpected stderr:\n{stderr}");
+    assert!(
+        stderr.contains("missing API key"),
+        "unexpected stderr:\n{stderr}"
+    );
 }
 
 #[test]

@@ -8,10 +8,7 @@ pub struct VerifyArtifactArgs {
 
 pub fn run_verify_artifact(args: &VerifyArtifactArgs) -> i32 {
     if !args.dir.is_dir() {
-        eprintln!(
-            "verify-artifact: not a directory: {}",
-            args.dir.display()
-        );
+        eprintln!("verify-artifact: not a directory: {}", args.dir.display());
         return 2;
     }
     let manifest = match verify_package(&args.dir) {
@@ -21,14 +18,13 @@ pub fn run_verify_artifact(args: &VerifyArtifactArgs) -> i32 {
             return 1;
         }
     };
-    let evidence_text =
-        match std::fs::read_to_string(args.dir.join("evidence.json")) {
-            Ok(text) => text,
-            Err(e) => {
-                eprintln!("verify-artifact: cannot read evidence: {}", e);
-                return 1;
-            }
-        };
+    let evidence_text = match std::fs::read_to_string(args.dir.join("evidence.json")) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("verify-artifact: cannot read evidence: {}", e);
+            return 1;
+        }
+    };
     let evidence_status = match serde_json::from_str::<BenchmarkReport>(&evidence_text) {
         Ok(report) => format!(
             "benchmark evidence: protocol {} · {} measured runs",
@@ -38,7 +34,10 @@ pub fn run_verify_artifact(args: &VerifyArtifactArgs) -> i32 {
         Err(_) => "benchmark evidence: present but not a benchmark report".to_string(),
     };
     let deployment = manifest.deployment.as_ref();
-    println!("artifact: {}", manifest.artifact_hash.as_deref().unwrap_or("unknown"));
+    println!(
+        "artifact: {}",
+        manifest.artifact_hash.as_deref().unwrap_or("unknown")
+    );
     println!("model:    {}", manifest.model);
     println!(
         "target:   {}",

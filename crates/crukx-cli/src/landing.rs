@@ -30,7 +30,11 @@ pub fn run_landing(cwd: &Path) -> i32 {
         "{}",
         ui::header(
             "Crukx",
-            Some(&format!("{} · {}", cwd.display(), env!("CARGO_PKG_VERSION"))),
+            Some(&format!(
+                "{} · {}",
+                cwd.display(),
+                env!("CARGO_PKG_VERSION")
+            )),
             color
         )
     );
@@ -69,7 +73,13 @@ pub fn run_landing(cwd: &Path) -> i32 {
         }
     }
 
-    println!("{}", ui::hint("`crukx doctor` checks the install · `crukx --help` lists commands", color));
+    println!(
+        "{}",
+        ui::hint(
+            "`crukx doctor` checks the install · `crukx --help` lists commands",
+            color
+        )
+    );
     0
 }
 
@@ -82,11 +92,7 @@ fn count_contracts(state: &StateDir) -> usize {
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "json")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
                 .count()
         })
         .unwrap_or(0)
@@ -104,10 +110,7 @@ fn sessions_count(state: &StateDir) -> usize {
 }
 
 fn judge_status(state: &StateDir, color: bool) -> String {
-    let has_baseline = state
-        .evaluators_dir()
-        .join("baseline.json")
-        .exists();
+    let has_baseline = state.evaluators_dir().join("baseline.json").exists();
     if has_baseline {
         ui::ok_mark(color) + " judge calibrated"
     } else {
