@@ -107,12 +107,17 @@ fn run_claimed_job(job: &serde_json::Value) -> (String, serde_json::Value) {
             );
         }
     };
+    let min_successes = payload
+        .get("min_successes")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
     let config = BenchmarkConfig {
         warmup_runs: payload_u32(&payload, "warmup", 1),
         measured_runs: payload_u32(&payload, "runs", 5).max(1),
         prompt: payload_string(&payload, "prompt").unwrap_or_else(|| "benchmark".to_string()),
         max_tokens: payload_u32(&payload, "max_tokens", 32),
         timeout_secs: payload_u64(&payload, "timeout_secs", 120),
+        min_successes,
     };
     match benchmark(&adapter, &profile, &model, &config) {
         Ok(report) => {

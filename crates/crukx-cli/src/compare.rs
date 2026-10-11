@@ -145,6 +145,7 @@ mod tests {
                 prompt: "hi".to_string(),
                 max_tokens: 8,
                 timeout_secs: 5,
+                min_successes: None,
             },
             warmup_durations_ms: vec![],
             measurements: vec![],
@@ -155,6 +156,7 @@ mod tests {
                 mean_ms: mean,
                 median_ms: median,
                 p95_ms: p95,
+                tok_s_mean: None,
             }),
         }
     }

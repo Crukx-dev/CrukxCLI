@@ -133,6 +133,9 @@ enum Command {
         /// Per-execution timeout in seconds.
         #[arg(long, default_value_t = 120)]
         timeout_secs: u64,
+        /// Fail unless at least this many measured runs succeed.
+        #[arg(long)]
+        min_successes: Option<u32>,
         /// Print the full benchmark report as JSON.
         #[arg(long)]
         json: bool,
@@ -323,6 +326,7 @@ fn main() {
             warmup,
             max_tokens,
             timeout_secs,
+            min_successes,
             json,
         } => benchmark::run_benchmark(&benchmark::BenchmarkArgs {
             model,
@@ -331,6 +335,7 @@ fn main() {
             warmup,
             max_tokens,
             timeout_secs,
+            min_successes,
             json,
         }),
         Command::Deploy {

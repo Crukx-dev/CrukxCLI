@@ -11,6 +11,7 @@ pub struct BenchmarkArgs {
     pub warmup: u32,
     pub max_tokens: u32,
     pub timeout_secs: u64,
+    pub min_successes: Option<u32>,
     pub json: bool,
 }
 
@@ -37,6 +38,7 @@ pub fn run_benchmark(args: &BenchmarkArgs) -> i32 {
         prompt: args.prompt.clone(),
         max_tokens: args.max_tokens,
         timeout_secs: args.timeout_secs,
+        min_successes: args.min_successes,
     };
     let report = match benchmark(&adapter, &profile, &args.model.to_string_lossy(), &config) {
         Ok(report) => report,
