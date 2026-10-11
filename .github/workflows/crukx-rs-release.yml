@@ -30,6 +30,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Authenticate cargo to the private engine repo
+        env:
+          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
+        run: |
+          if [ -z "$CORE_GIT_TOKEN" ]; then
+            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
