@@ -77,14 +77,54 @@ pub fn run_report(args: &ReportArgs) -> i32 {
         .out
         .clone()
         .unwrap_or_else(|| args.artifact.join("REPORT.md"));
-    match std::fs::write(&out, &markdown) {
-        Ok(_) => {
-            println!("report: {}", out.display());
-            0
-        }
-        Err(e) => {
-            eprintln!("report: cannot write {}: {}", out.display(), e);
-            1
+    if let Err(e) = std::fs::write(&out, &markdown) {
+        eprintln!("report: cannot write {}: {}", out.display(), e);
+        return 1;
+    }
+    println!("report: {}", out.display());
+    let script_path = args.artifact.join("reproduce.sh");
+    if let Err(e) = std::fs::write(&script_path, reproduce_script(&manifest, &evidence)) {
+        eprintln!("report: cannot write {}: {}", script_path.display(), e);
+        return 1;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(&script_path) {
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o755);
+            let _ = std::fs::set_permissions(&script_path, permissions);
         }
     }
+    println!("reproduce: {}", script_path.display());
+    0
+}
+
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+fn reproduce_script(
+    manifest: &crukx_core::contracts::artifact::ArtifactManifest,
+    evidence: &BenchmarkReport,
+) -> String {
+    let config = &evidence.config;
+    format!(
+        "#!/bin/sh\n\
+         # Reproduce artifact {hash} ({model}).\n\
+         # Provide the model file and the verifier-produced record used originally.\n\
+         set -e\n\
+         DIR=$(cd \"$(dirname \"$0\")\" && pwd)\n\
+         : \"${{MODEL:?set MODEL to the model file}}\"\n\
+         : \"${{VERIFICATION:?set VERIFICATION to the verifier-produced record}}\"\n\
+         crukx benchmark \"$MODEL\" --prompt {prompt} --runs {runs} --warmup {warmup} --max-tokens {tokens} --timeout-secs {timeout} --json > /tmp/crukx-repro-report.json\n\
+         crukx compare /tmp/crukx-repro-report.json \"$DIR/evidence.json\"\n",
+        hash = manifest.artifact_hash.as_deref().unwrap_or("unknown"),
+        model = manifest.model,
+        prompt = shell_quote(&config.prompt),
+        runs = config.measured_runs,
+        warmup = config.warmup_runs,
+        tokens = config.max_tokens,
+        timeout = config.timeout_secs,
+    )
 }

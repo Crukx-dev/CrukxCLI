@@ -81,6 +81,16 @@ fn deploy_then_report_names_selection_and_rejection() {
         markdown.contains("rejected: quality regression"),
         "unexpected report:\n{markdown}"
     );
+    let script = std::fs::read_to_string(out.join("reproduce.sh")).unwrap();
+    assert!(
+        script.contains("crukx benchmark"),
+        "unexpected script:\n{script}"
+    );
+    assert!(
+        script.contains("crukx compare"),
+        "unexpected script:\n{script}"
+    );
+    assert!(script.contains("--runs 1"), "unexpected script:\n{script}");
 }
 
 #[test]
