@@ -57,14 +57,9 @@ pub fn run_report(args: &ReportArgs) -> i32 {
             return 1;
         }
     };
-    let suite = manifest
-        .verification
-        .as_ref()
-        .map(|v| v.suite.clone())
-        .unwrap_or_else(|| "unknown".to_string());
     let report = build_report(
         &manifest,
-        &suite,
+        &evidence,
         &candidates,
         &SelectionConstraints {
             max_quality_regression: args.max_regression,
