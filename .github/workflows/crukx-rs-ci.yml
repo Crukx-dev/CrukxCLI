@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-22.04, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       # Keep LF on Windows so rustfmt --check and fixtures match Linux/macOS.
       - run: git config --global core.autocrlf false
@@ -36,6 +36,9 @@ jobs:
             exit 1
           fi
           git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - uses: actions/setup-node@v4 # assertion tests run `node`
+        with:
+          node-version: 20
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -52,3 +55,45 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  # Other Linux distros (different libc, compilers, package managers). Runs inside
+  # distro containers; ubuntu 22.04 and arm64 are in the OS matrix above.
+  distros:
+    name: Linux (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:12", pm: apt }
+          - { image: "fedora:41", pm: dnf }
+          - { image: "alpine:3.20", pm: apk } # musl libc
+          - { image: "archlinux:latest", pm: pacman }
+    steps:
+      - name: System packages
+        run: |
+          case "${{ matrix.pm }}" in
+            apt) apt-get update && apt-get install -y build-essential git curl pkg-config ca-certificates nodejs bash tar zstd ;;
+            dnf) dnf install -y gcc gcc-c++ make git curl pkgconf-pkg-config nodejs bash tar zstd ;;
+            apk) apk add --no-cache build-base git curl pkgconf nodejs bash tar zstd ;;
+            pacman) pacman -Sy --noconfirm base-devel git curl nodejs bash tar zstd ;;
+          esac
+      - uses: actions/checkout@v4
+      - name: Authenticate cargo to the private engine repo
+        shell: bash
+        env:
+          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
+        run: |
+          if [ -z "$CORE_GIT_TOKEN" ]; then
+            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Install Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain ${{ matrix.toolchain || 'stable' }}
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
