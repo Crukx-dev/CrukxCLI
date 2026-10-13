@@ -6,35 +6,28 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Authenticate cargo to the private engine repo
-        env:
-          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
-        run: |
-          if [ -z "$CORE_GIT_TOKEN" ]; then
-            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-targets
-
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      # Keep LF on Windows so rustfmt --check and fixtures match Linux/macOS.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - name: Authenticate cargo to the private engine repo
+        shell: bash
         env:
           CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
         run: |
@@ -44,44 +37,18 @@ jobs:
           fi
           git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: Formatting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Authenticate cargo to the private engine repo
-        env:
-          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
-        run: |
-          if [ -z "$CORE_GIT_TOKEN" ]; then
-            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Authenticate cargo to the private engine repo
-        env:
-          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
-        run: |
-          if [ -z "$CORE_GIT_TOKEN" ]; then
-            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
