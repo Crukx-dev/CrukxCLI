@@ -1,0 +1,16 @@
+# Vendored engine: build without GitHub access to the private core repo.
+#
+# `crukx-core` / `crukx-runner` / `crukx-storage` come from the private
+# https://github.com/Crukx-dev/crukx-core (branch main). CI runners have no
+# credentials for it, so the exact pinned sources are committed under
+# `vendor/` and this replacement makes cargo use them instead of fetching
+# git. crates.io packages are NOT vendored and still download normally.
+# NOTE: the `git` + `branch` keys are required alongside `replace-with` —
+# without them cargo reports "no source location specified".
+[source."git+https://github.com/Crukx-dev/crukx-core?branch=main"]
+git = "https://github.com/Crukx-dev/crukx-core"
+branch = "main"
+replace-with = "vendored-engine"
+
+[source.vendored-engine]
+directory = "vendor"

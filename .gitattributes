@@ -1,0 +1,5 @@
+# Keep vendored engine sources byte-identical on every OS.
+# Cargo verifies .cargo-checksum.json on use; CRLF conversion on Windows
+# checkouts would break verification.
+vendor/** -text
+.cargo/config.toml -text

@@ -26,16 +26,8 @@ jobs:
       # Keep LF on Windows so rustfmt --check and fixtures match Linux/macOS.
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
-      - name: Authenticate cargo to the private engine repo
-        shell: bash
-        env:
-          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
-        run: |
-          if [ -z "$CORE_GIT_TOKEN" ]; then
-            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+      # No engine auth needed: the pinned crukx-core sources are vendored
+      # (vendor/ + .cargo/config.toml), crates.io is public.
       - uses: actions/setup-node@v4 # assertion tests run `node`
         with:
           node-version: 20
@@ -80,16 +72,8 @@ jobs:
             pacman) pacman -Sy --noconfirm base-devel git curl nodejs bash tar zstd ;;
           esac
       - uses: actions/checkout@v4
-      - name: Authenticate cargo to the private engine repo
-        shell: bash
-        env:
-          CORE_GIT_TOKEN: ${{ secrets.CORE_GIT_TOKEN }}
-        run: |
-          if [ -z "$CORE_GIT_TOKEN" ]; then
-            echo "::error::CORE_GIT_TOKEN repository secret is missing. Create a read-only personal access token for Crukx-dev/crukx-core and store it as CORE_GIT_TOKEN."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${CORE_GIT_TOKEN}@github.com/".insteadOf "https://github.com/"
+      # No engine auth needed: the pinned crukx-core sources are vendored
+      # (vendor/ + .cargo/config.toml), crates.io is public.
       - name: Install Rust
         shell: bash
         run: |
