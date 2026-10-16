@@ -49,3 +49,35 @@ Note: `crx-rs` is out of our control — no Varun task depending on it is starte
 - No push performed (brief §7: pushing needs explicit permission).
   Pending push when authorized: this WORKLOG commit + the `Cargo.lock` bump
   (the lock fix is required for CI to ever compile).
+
+## 2026-10-16 — Session 3: green CI without secrets (vendor engine)
+
+### Task (user: "make CI pass without admin access")
+- Root-caused the red CI: `CORE_GIT_TOKEN` secret missing AND repo is
+  genuinely private (proved via isolated `git ls-remote` → auth required;
+  earlier success was the local `gh` credential helper, not anonymous access).
+- Fix: vendored the pinned engine crates into `vendor/` (408 KB) +
+  `.cargo/config.toml` source replacement + `.gitattributes` (`-text` so
+  checksums survive Windows checkouts) + `vendor/README.md` refresh recipe.
+  Deleted the 2 hard-failing auth steps from `crukx-rs-ci.yml`.
+- Subtlety found: `[source]` table needs `git` + `branch` keys alongside
+  `replace-with`, else cargo errors "no source location specified".
+- Proof (not assumption): rebuilt engine crates with `~/.cargo/git` moved
+  away AND github.com redirected to a dead host — build succeeded, so the
+  engine provably comes from `vendor/`, never the network.
+- Follow-up fix in same session: `gate_pass_k_e2e` flaky test failed ONLY
+  on fedora:41 — its "flakiness" source was child-PID parity, which scored
+  8/8 even PIDs there. Replaced with a deterministic counter-file script
+  (7/8 → BLOCK, verified manually: `pass^8: 7/8`, `BLOCKED`, exit 1).
+
+### Validation
+- Local: full suite green (all binaries `0 failed`), fmt + clippy clean,
+  new test 5/5 stable.
+- Remote CI on push `6e152eb`: **10/10 success** incl. fedora:41, Windows,
+  macOS, arm64, all distro containers. `crukx-db` also 10/10 on its vendor
+  push. `crukx-core` green throughout. No secret added anywhere.
+
+### Maintenance warning
+- Downstream CI now tests the *vendored* engine snapshot, not live main.
+  After any core change: run the `vendor/README.md` refresh + lock bump in
+  CLI and db, or CI silently tests stale code. Same cadence as lock bumps.
