@@ -1,10 +1,11 @@
-//! `crukx.yml`'s per-contract `repeat: k` threaded through the full gate,
-//! verified live by hand first: a flaky contract (exit code = each real
-//! spawned process's own PID parity) at repeat: 8 scored 2/8 real passes
-//! and correctly BLOCKED; a deterministic contract at repeat: 5 scored
-//! 5/5 and correctly PASSed. VTR/diagnostic-coverage/P95-latency all kept
-//! working unmodified, since pass^k collapses into the same
-//! ReplayOutcome.decision those already read.
+//! `crukx.yml`'s per-contract `repeat: k` threaded through the full gate.
+//! The flaky contract fails deterministically on exactly one of its runs
+//! via a counter file in the shared replay cwd (all repeats run
+//! sequentially in the same directory): 7/8 passes and the gate BLOCKs.
+//! A previous revision used child-PID parity as the flakiness source, but
+//! PID allocation patterns are environment-dependent — it scored 8/8 even
+//! PIDs on fedora:41 CI and the gate wrongly PASSed. Wall-clock, PID, and
+//! scheduling state must never decide this test's outcome.
 
 use assert_cmd::Command;
 use std::fs;
@@ -43,7 +44,18 @@ fn write_contract(dir: &std::path::Path, id: &str, executable: &str, arguments: 
 #[test]
 fn gate_blocks_a_flaky_contract_via_pass_k_even_with_repeat_configured_in_crukx_yml() {
     let dir = tempfile::tempdir().unwrap();
-    write_contract(dir.path(), "flaky", "sh", &["-c", "exit $(( $$ % 2 ))"]);
+    // Deterministic flake: passes runs 1-7, fails run 8. Every repeat runs
+    // sequentially with cwd = dir, so the counter file is exact — no PID,
+    // timing, or scheduler dependence.
+    write_contract(
+        dir.path(),
+        "flaky",
+        "sh",
+        &[
+            "-c",
+            "c=$(cat .flaky_count 2>/dev/null || echo 0); echo $((c+1)) > .flaky_count; [ $c -lt 7 ]",
+        ],
+    );
     fs::write(
         dir.path().join("crukx.yml"),
         "contracts:\n  - id: flaky\n    mode: block\n    repeat: 8\n",
