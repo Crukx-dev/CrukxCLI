@@ -81,3 +81,28 @@ Note: `crx-rs` is out of our control — no Varun task depending on it is starte
 - Downstream CI now tests the *vendored* engine snapshot, not live main.
   After any core change: run the `vendor/README.md` refresh + lock bump in
   CLI and db, or CI silently tests stale code. Same cadence as lock bumps.
+
+## 2026-10-19 — Session 4: vendor/lock sync fix + CI green
+
+### Task (user: "there are bugs. fix them")
+Found and fixed the real bug: **vendor/Cargo.lock drift**. CLI `Cargo.lock`
+pinned crukx-core at `1b00682` but core main had advanced to `4f8c757`
+(SkyPilot commit, no Rust changes but new files). If anyone ran
+`cargo update -p crukx-core` downstream, Cargo.lock would point to
+`4f8c757` which wasn't in `vendor/`, and the build would fail without
+git credentials.
+
+### Fix
+- `cargo update -p crukx-core -p crukx-runner` → pins `4f8c757`
+- Re-vendored engine crates at `4f8c757` (proven: rebuilds with
+  `~/.cargo/git` removed and github.com unreachable)
+- Updated `vendor/README.md` pinned rev
+
+### Validation
+- `cargo test --workspace`: ALL_GREEN, fmt clean, clippy clean
+- Remote CI on push `f30a3cd`: **10/10 success** (all OSes + 4 distros)
+
+### Next action
+- All three repos in sync, CI green. V1–V4 still blocked on Shafwan's
+  interfaces (draft at `crukx-core/INTERFACE_REQUESTS_DRAFT.md`, unsent —
+  needs your approval per brief §7).
