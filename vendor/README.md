@@ -5,7 +5,7 @@ This directory holds the exact `crukx-core` workspace sources pinned by
 so builds — including CI without private-repo credentials — never fetch
 the engine from GitHub. Wired up by `.cargo/config.toml`.
 
-Pinned engine rev: `1b00682` (refresh together with `Cargo.lock`).
+Pinned engine rev: `4f8c757` (refresh together with `Cargo.lock`).
 
 ## Refresh after an engine update
 
