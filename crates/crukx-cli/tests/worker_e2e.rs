@@ -45,11 +45,11 @@ fn worker_unreachable_plane_exits_1() {
     );
 }
 
-/// Minimal one-shot-per-response HTTP server for claim/patch behaviour —
-/// binds an ephemeral port and replays canned `(status, body)` responses.
+/// Minimal HTTP server for claim/patch behaviour — binds an ephemeral port
+/// and replays canned `(status, body)` responses, one per request.
 fn spawn_mock(responses: Vec<(u16, String)>) -> String {
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{Shutdown, TcpListener};
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -58,13 +58,49 @@ fn spawn_mock(responses: Vec<(u16, String)>) -> String {
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
             };
-            let mut buf = [0u8; 8192];
-            let _ = stream.read(&mut buf);
+            // Drain the full request (headers + Content-Length body) before
+            // answering: replying while request bytes are still in flight
+            // turns the close into an abortive reset on Windows, and the
+            // client then reports "connection forcibly closed" instead of
+            // ever seeing our response.
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 1024];
+            let body_start = loop {
+                let n = stream.read(&mut chunk).unwrap_or(0);
+                if n == 0 {
+                    break request.len();
+                }
+                request.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+            };
+            let content_length = String::from_utf8_lossy(&request[..body_start])
+                .lines()
+                .filter_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())?
+                })
+                .next()
+                .unwrap_or(0);
+            while request.len() < body_start + content_length {
+                let n = stream.read(&mut chunk).unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..n]);
+            }
+
             let response = format!(
                 "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+            // Clean FIN, not an RST: the client must be able to read the
+            // response before the socket goes away.
+            let _ = stream.shutdown(Shutdown::Write);
         }
     });
     format!("http://{addr}")
