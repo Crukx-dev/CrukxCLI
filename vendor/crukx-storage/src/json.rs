@@ -62,7 +62,12 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), StorageErr
         fs::create_dir_all(parent)?;
     }
     let raw = serde_json::to_string_pretty(value)?;
-    fs::write(path, raw)?;
+    // Write-then-rename: a crash mid-write must not destroy the previous
+    // contents — these files include tamper-evidence chain checkpoints,
+    // where a torn write makes a session permanently unverifiable.
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, raw)?;
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 

@@ -38,7 +38,13 @@ impl LlamaCppAdapter {
             return text;
         }
         let mut truncated = text;
-        truncated.truncate(MAX_OUTPUT_BYTES);
+        // Back off to a char boundary: `String::truncate` panics when
+        // MAX_OUTPUT_BYTES falls inside a multi-byte codepoint.
+        let mut cut = MAX_OUTPUT_BYTES;
+        while cut > 0 && !truncated.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        truncated.truncate(cut);
         truncated.push_str("\n[truncated]");
         truncated
     }
@@ -145,6 +151,26 @@ impl RuntimeAdapter for LlamaCppAdapter {
         let timeout = Duration::from_secs(request.timeout_secs);
         let poll = Duration::from_millis(10);
         let pid = child.id();
+
+        // Drain both pipes while the process runs. The OS pipe buffer is
+        // ~64KB: waiting for exit before reading (as this used to) blocks a
+        // child that logs more than that on write(), so a successful run
+        // looked like a Timeout and was killed.
+        let stdout_handle = child.stdout.take().map(|mut pipe| {
+            std::thread::spawn(move || {
+                let mut buf = String::new();
+                let _ = pipe.read_to_string(&mut buf);
+                buf
+            })
+        });
+        let stderr_handle = child.stderr.take().map(|mut pipe| {
+            std::thread::spawn(move || {
+                let mut buf = String::new();
+                let _ = pipe.read_to_string(&mut buf);
+                buf
+            })
+        });
+
         let mut peak_memory_kb: Option<u64> = None;
         loop {
             if let Some(rss) = Self::peak_rss_kb(pid) {
@@ -155,14 +181,12 @@ impl RuntimeAdapter for LlamaCppAdapter {
                 .map_err(|e| RuntimeError::ExecutionFailed(e.to_string()))?
             {
                 Some(status) => {
-                    let mut stdout = String::new();
-                    let mut stderr = String::new();
-                    if let Some(mut out) = child.stdout.take() {
-                        let _ = out.read_to_string(&mut stdout);
-                    }
-                    if let Some(mut err) = child.stderr.take() {
-                        let _ = err.read_to_string(&mut stderr);
-                    }
+                    let stdout = stdout_handle
+                        .and_then(|h| h.join().ok())
+                        .unwrap_or_default();
+                    let stderr = stderr_handle
+                        .and_then(|h| h.join().ok())
+                        .unwrap_or_default();
                     let combined_log = format!("{}{}", stdout, stderr);
                     return Ok(ExecutionResult {
                         exit_code: status.code().unwrap_or(1),
@@ -178,6 +202,14 @@ impl RuntimeAdapter for LlamaCppAdapter {
                     if started.elapsed() >= timeout {
                         let _ = child.kill();
                         let _ = child.wait();
+                        // Reap the drain threads (the pipes hit EOF once the
+                        // child is dead) so the kill path doesn't leak them.
+                        if let Some(h) = stdout_handle {
+                            let _ = h.join();
+                        }
+                        if let Some(h) = stderr_handle {
+                            let _ = h.join();
+                        }
                         return Err(RuntimeError::Timeout);
                     }
                     std::thread::sleep(poll);
@@ -256,6 +288,35 @@ mod tests {
         assert!(result.stdout.contains("model-output"));
         assert!(!result.timed_out);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn large_child_output_does_not_deadlock() {
+        // 200KB >> the ~64KB OS pipe buffer: draining only after exit (the old
+        // behaviour) blocks the child on write() forever and this becomes a
+        // spurious Timeout.
+        let path = script_fixture("head -c 200000 /dev/zero | tr '\\0' 'a'\nexit 0\n");
+        let adapter = LlamaCppAdapter::new(LlamaCppConfig {
+            binary: path.to_string_lossy().to_string(),
+            ..LlamaCppConfig::default()
+        });
+        let result = adapter.execute(&request()).unwrap();
+        assert!(result.succeeded());
+        assert!(!result.timed_out);
+        assert!(result.stdout.len() > 100_000);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn truncate_output_is_safe_on_multibyte_boundaries() {
+        // MAX_OUTPUT_BYTES landing inside a multi-byte codepoint must not panic.
+        let mut text = "a".repeat(MAX_OUTPUT_BYTES - 1);
+        text.push('é');
+        text.push_str("tail");
+        let truncated = LlamaCppAdapter::truncate_output(text);
+        assert!(truncated.ends_with("\n[truncated]"));
+        assert!(truncated.len() <= MAX_OUTPUT_BYTES + "\n[truncated]".len());
     }
 
     #[cfg(unix)]

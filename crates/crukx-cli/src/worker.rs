@@ -34,7 +34,20 @@ fn claim_job(api_url: &str, key: &str) -> Result<Option<serde_json::Value>, Stri
     if response.status() == 204 {
         return Ok(None);
     }
-    response.into_json().map(Some).map_err(|e| e.to_string())
+    // 200 + a job body is the only other valid answer. Anything else (an
+    // error envelope, a proxy page, a redirect body) must not be mistaken
+    // for claimed work and turned into a phantom job.
+    if response.status() != 200 {
+        return Err(format!(
+            "unexpected http status {} from claim",
+            response.status()
+        ));
+    }
+    let job: serde_json::Value = response.into_json().map_err(|e| e.to_string())?;
+    if job.get("job_id").and_then(|v| v.as_str()).is_none() {
+        return Err(format!("claim response is not a job: {job}"));
+    }
+    Ok(Some(job))
 }
 
 fn patch_job(
@@ -44,12 +57,20 @@ fn patch_job(
     state: &str,
     result: serde_json::Value,
 ) -> Result<(), String> {
-    ureq::patch(&format!("{}/api/jobs/{}", api_url, job_id))
+    let response = ureq::patch(&format!("{}/api/jobs/{}", api_url, job_id))
         .set("Authorization", &format!("Bearer {}", key))
         .set("Content-Type", "application/json")
         .timeout(std::time::Duration::from_secs(30))
         .send_json(serde_json::json!({"state": state, "result": result}))
         .map_err(|e| e.to_string())?;
+    // Be explicit rather than relying on the client's error policy: losing a
+    // job report must never look like success to the caller.
+    if response.status() != 200 {
+        return Err(format!(
+            "unexpected http status {} reporting job",
+            response.status()
+        ));
+    }
     Ok(())
 }
 

@@ -33,8 +33,20 @@ pub fn chain_file_path(state: &StateDir, session_id: &str) -> PathBuf {
 pub fn write_chain_file(state: &StateDir, session_id: &str) -> Result<(), StorageError> {
     let session = load_session(state, session_id)
         .map_err(|err| StorageError::Io(std::io::Error::other(err.to_string())))?;
+    // Checkpointing a log with unreadable lines would canonize a lossy
+    // history: the chain would cover only the surviving events, and verify
+    // would keep agreeing with it while evidence is missing.
+    if session.unreadable_count > 0 {
+        return Err(StorageError::Io(std::io::Error::other(format!(
+            "refusing to write chain for {}: {} unreadable event line(s) in the log",
+            session.file_path.display(),
+            session.unreadable_count
+        ))));
+    }
     let chain = compute_chain(&session.events);
-    crate::json::write_json(&chain_file_path(state, session_id), &chain)
+    // `load_session` resolves "latest" — the chain belongs to the resolved
+    // session's file, never to one literally named "latest.chain.json".
+    crate::json::write_json(&chain_file_path(state, &session.session_id), &chain)
 }
 
 #[derive(Debug)]
@@ -42,6 +54,11 @@ pub enum IntegrityError {
     Session(SessionLoadError),
     Storage(StorageError),
     Tampered(ChainViolation),
+    /// Lines in the log don't parse and were dropped on load — "history
+    /// intact" can't be claimed for what's on disk.
+    Unreadable {
+        count: usize,
+    },
 }
 
 impl fmt::Display for IntegrityError {
@@ -56,6 +73,10 @@ impl fmt::Display for IntegrityError {
                     violation.first_divergent_index
                 )
             }
+            IntegrityError::Unreadable { count } => write!(
+                f,
+                "history integrity check failed: {count} unreadable event line(s) in the log"
+            ),
         }
     }
 }
@@ -68,8 +89,16 @@ impl std::error::Error for IntegrityError {}
 /// for it — either edited, truncated, or reordered since then.
 pub fn verify_session_integrity(state: &StateDir, session_id: &str) -> Result<(), IntegrityError> {
     let session = load_session(state, session_id).map_err(IntegrityError::Session)?;
-    let recorded_hashes: Vec<String> = crate::json::read_json(&chain_file_path(state, session_id))
-        .map_err(IntegrityError::Storage)?;
+    // The loader drops unparseable lines: verifying only the survivors would
+    // let a truncated or corrupted log pass as "history intact".
+    if session.unreadable_count > 0 {
+        return Err(IntegrityError::Unreadable {
+            count: session.unreadable_count,
+        });
+    }
+    let recorded_hashes: Vec<String> =
+        crate::json::read_json(&chain_file_path(state, &session.session_id))
+            .map_err(IntegrityError::Storage)?;
     verify_chain(&session.events, &recorded_hashes).map_err(IntegrityError::Tampered)
 }
 
@@ -81,6 +110,15 @@ pub fn append_event(
     session_id: &str,
     event: &AgentEvent,
 ) -> Result<(), StorageError> {
+    // `session_id` is joined onto events_dir below — apply the same
+    // traversal rule `load_session` enforces for its callers (pathsafe.rs:
+    // every join of caller input onto a fixed base must be checked).
+    if !is_safe_path_segment(session_id) {
+        return Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unsafe session id {session_id:?}: must be a plain filename segment"),
+        )));
+    }
     let path = session_file_path(state, session_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -431,5 +469,53 @@ mod tests {
             matches!(result, Err(IntegrityError::Storage(_))),
             "{result:?}"
         );
+    }
+
+    #[test]
+    fn verify_session_integrity_latest_resolves_to_the_written_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateDir::at(dir.path());
+        // run.rs checkpoints under the real session id…
+        append_event(&state, "sess-1", &event(1)).unwrap();
+        append_event(&state, "sess-1", &event(2)).unwrap();
+        write_chain_file(&state, "sess-1").unwrap();
+
+        // …so `verify-session latest` must find that chain, not a file
+        // literally named "latest.chain.json" (which never exists).
+        assert!(verify_session_integrity(&state, "latest").is_ok());
+    }
+
+    #[test]
+    fn chain_and_verify_refuse_logs_with_unreadable_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateDir::at(dir.path());
+        append_event(&state, "sess-1", &event(1)).unwrap();
+        append_event(&state, "sess-1", &event(2)).unwrap();
+        write_chain_file(&state, "sess-1").unwrap();
+
+        // Corrupt one line: the loader drops it, so "intact" must not be
+        // claimable and a new checkpoint must not canonize the loss.
+        let path = session_file_path(&state, "sess-1");
+        let mut raw = fs::read_to_string(&path).unwrap();
+        raw.push_str("{not json at all\n");
+        fs::write(&path, raw).unwrap();
+
+        let result = verify_session_integrity(&state, "sess-1");
+        assert!(
+            matches!(result, Err(IntegrityError::Unreadable { count: 1 })),
+            "{result:?}"
+        );
+        assert!(write_chain_file(&state, "sess-1").is_err());
+    }
+
+    #[test]
+    fn append_event_rejects_unsafe_session_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateDir::at(dir.path());
+
+        let result = append_event(&state, "../evil", &event(1));
+        assert!(result.is_err(), "{result:?}");
+        // Nothing escaped the events dir.
+        assert!(!dir.path().join("evil.jsonl").exists());
     }
 }

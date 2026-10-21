@@ -106,3 +106,35 @@ git credentials.
 - All three repos in sync, CI green. V1–V4 still blocked on Shafwan's
   interfaces (draft at `crukx-core/INTERFACE_REQUESTS_DRAFT.md`, unsent —
   needs your approval per brief §7).
+
+## 2026-10-21 — Session 5: audit fixes (worker claim/patch, engine re-vendor)
+
+### Task (user: "check the codebase for bugs and issues. fix and push")
+Repo-wide audit (findings cross-checked against code before fixing) turned
+up one local bug plus engine fixes that had to be re-vendored in.
+
+### Fix
+- `crates/crukx-cli/src/worker.rs`: `claim_job` trusted any non-204 response
+  as claimed work — a 2xx body that wasn't a job (error envelope, proxy
+  page) became a phantom `job_id: "unknown"` and a PATCH to `/api/jobs/unknown`.
+  Claim now requires 200 AND a `job_id` before anything runs; `patch_job`
+  checks its status explicitly instead of relying on the HTTP client's error
+  policy, so a lost job report can never look like success. (Note: with
+  ureq 2.x, 4xx/5xx already surfaced as errors — the gap was 2xx-but-not-200
+  and unvalidated bodies.)
+- 3 new e2e tests with an in-test mock HTTP server:
+  `worker_rejects_a_non_job_claim_body`, `worker_rejects_an_unexpected_status_as_a_job`,
+  `worker_claims_runs_and_reports_a_real_job`.
+- Re-vendored engine at `bbefad1` (Cargo.lock + vendor/ + README rev):
+  picks up the crukx-core fixes in crukx-runner (pipe deadlock: child output
+  >64KB became a spurious Timeout; truncate_output UTF-8 panic) and
+  crukx-storage (verify-session latest chain path; unreadable-line tamper
+  gap; append_event path traversal; atomic chain writes).
+
+### Validation
+- `cargo test --workspace` ALL_GREEN (worker e2e 6/6), clippy
+  `--all-targets -D warnings` clean, fmt clean
+- vendored copies byte-identical to crukx-core@bbefad1
+
+### Next action
+- All three repos in sync again. crukx-cloud audit fixes land in crukx-db.
