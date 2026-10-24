@@ -166,7 +166,10 @@ pub fn run_judge(
         eprintln!("Crukx judge: every call failed — check network/key/base-url");
         return 1;
     }
-    let agreement = agreements as f64 / cases.len() as f64;
+    // Failed calls are excluded from scoring, so they're excluded from the
+    // denominator too — otherwise endpoint flakiness depresses the stored
+    // rate that `crukx gate`'s drift detection compares against.
+    let agreement = agreements as f64 / scored as f64;
 
     let record = crukx_core::evaluators::registry::JudgeRecord {
         judge_id: "llm-judge".to_string(),
@@ -272,28 +275,31 @@ fn call_anthropic(base_url: &str, api_key: &str, model: &str, prompt: &str) -> O
                 .into_json()
                 .ok()
         })();
-        if let Some(response) = attempt_result {
-            // Prefer the text block; fall back to the thinking block —
-            // MiMo reasons out loud first, and its thinking still names
-            // the verdict.
-            let text = response["content"]
-                .as_array()?
-                .iter()
-                .find_map(|block| {
-                    block["text"]
-                        .as_str()
-                        .or_else(|| block["thinking"].as_str())
-                })
-                .map(str::to_string);
-            if let Some(text) = text {
-                return Some(text);
-            }
+        // A malformed 200 (error envelope, wrong wire shape) is just a failed
+        // attempt: retry it rather than abandoning the whole call.
+        if let Some(text) = attempt_result.as_ref().and_then(anthropic_text) {
+            return Some(text);
         }
         std::thread::sleep(std::time::Duration::from_millis(
             1500 * (attempt as u64 + 1),
         ));
     }
     None
+}
+
+/// The reply text of an Anthropic Messages response. Prefers the text
+/// block; falls back to the thinking block — MiMo reasons out loud first,
+/// and its thinking still names the verdict.
+fn anthropic_text(response: &serde_json::Value) -> Option<String> {
+    response["content"]
+        .as_array()?
+        .iter()
+        .find_map(|block| {
+            block["text"]
+                .as_str()
+                .or_else(|| block["thinking"].as_str())
+        })
+        .map(str::to_string)
 }
 
 fn call_openai(base_url: &str, api_key: &str, model: &str, prompt: &str) -> Option<String> {
@@ -382,6 +388,14 @@ fn pass_from_value(value: &serde_json::Value) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_text_is_none_for_a_malformed_200_so_the_call_retries() {
+        let envelope = serde_json::json!({"type": "error", "error": {"message": "overloaded"}});
+        assert_eq!(anthropic_text(&envelope), None);
+        let reply = serde_json::json!({"content": [{"type": "text", "text": "{\"pass\": true}"}]});
+        assert_eq!(anthropic_text(&reply).as_deref(), Some("{\"pass\": true}"));
+    }
 
     #[test]
     fn extract_pass_from_clean_json() {

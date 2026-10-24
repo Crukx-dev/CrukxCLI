@@ -35,8 +35,10 @@ function getPlatformInfo() {
   // Special case: Linux musl for Alpine/containers
   if (platform === "linux") {
     try {
+      // musl's ldd prints its banner to stderr and exits non-zero; glibc's
+      // prints to stdout. Check both (the classic `ldd --version 2>&1`).
       const ldd = spawnSync("ldd", ["--version"], { encoding: "utf8" });
-      if (ldd.stdout && ldd.stdout.includes("musl")) {
+      if (`${ldd.stdout ?? ""}${ldd.stderr ?? ""}`.includes("musl")) {
         return `${targetArch}-unknown-linux-musl`;
       }
     } catch {}
@@ -143,13 +145,18 @@ async function fetchPrebuiltBinary() {
     const archivePath = path.join(cacheDir, archiveName);
     fs.writeFileSync(archivePath, archive);
 
-    if (ext === ".tar.gz") {
-      spawnSync("tar", ["xzf", archivePath, "-C", binDir], { stdio: "inherit" });
-    } else {
-      spawnSync("unzip", ["-o", archivePath, "-d", binDir], { stdio: "inherit" });
-    }
+    const extract =
+      ext === ".tar.gz"
+        ? spawnSync("tar", ["xzf", archivePath, "-C", binDir], { stdio: "inherit" })
+        : spawnSync("unzip", ["-o", archivePath, "-d", binDir], { stdio: "inherit" });
 
     fs.unlinkSync(archivePath);
+    if (extract.error || extract.status !== 0) {
+      const tool = ext === ".tar.gz" ? "tar" : "unzip";
+      throw new Error(
+        `${tool} failed to extract ${archiveName}: ${extract.error?.message ?? `exit ${extract.status}`}`,
+      );
+    }
 
     if (os.platform() !== "win32") {
       fs.chmodSync(binaryPath, 0o755);
@@ -198,7 +205,13 @@ async function main() {
     console.error(`crukx-rs: failed to run ${binary}: ${result.error.message}`);
     process.exit(1);
   }
-  process.exit(result.status ?? 1);
+  // A signal death has status null: exit 128+N like a shell would, so Ctrl-C
+  // (130) is distinguishable from a gate BLOCK (1).
+  if (result.status !== null) {
+    process.exit(result.status);
+  }
+  const signo = result.signal ? os.constants.signals[result.signal] : undefined;
+  process.exit(signo ? 128 + signo : 1);
 }
 
 main().catch((err) => {

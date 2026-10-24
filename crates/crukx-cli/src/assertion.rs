@@ -75,7 +75,16 @@ pub fn run_assertion(assertion_file: &Path, context: &AssertContext, cwd: &Path)
     });
 
     match outcome {
-        Ok(outcome) => match serde_json::from_str::<AssertResult>(&outcome.stdout) {
+        // The result is the last non-empty line; anything before it is the
+        // assertion's own stdout (console.log etc.) and must not break parsing.
+        Ok(outcome) => match outcome
+            .stdout
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .map(serde_json::from_str::<AssertResult>)
+            .unwrap_or_else(|| serde_json::from_str(""))
+        {
             Ok(result) => result,
             Err(_) => AssertResult {
                 pass: false,
@@ -121,6 +130,19 @@ mod tests {
 
         let result = run_assertion(&assertion_path, &context(), dir.path());
         assert!(result.pass, "expected pass, got: {result:?}");
+    }
+
+    #[test]
+    fn run_assertion_ignores_stdout_noise_from_the_assertion() {
+        let dir = tempfile::tempdir().unwrap();
+        let assertion_path = dir.path().join("assert.mjs");
+        std::fs::write(
+            &assertion_path,
+            "export async function assert() { process.stdout.write('debug: no newline'); console.log('more'); return { pass: true }; }",
+        )
+        .unwrap();
+        let result = run_assertion(&assertion_path, &context(), dir.path());
+        assert!(result.pass, "{:?}", result.reason);
     }
 
     #[test]

@@ -81,12 +81,13 @@ fn payload_string(payload: &serde_json::Value, key: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn payload_u32(payload: &serde_json::Value, key: &str, default: u32) -> u32 {
-    payload
-        .get(key)
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32)
-        .unwrap_or(default)
+/// `default` when the key is absent; an error when it's present but doesn't
+/// fit in u32 (`v as u32` used to wrap, so 4294967297 runs became 1).
+fn payload_u32(payload: &serde_json::Value, key: &str, default: u32) -> Result<u32, String> {
+    match payload.get(key).and_then(|v| v.as_u64()) {
+        None => Ok(default),
+        Some(v) => u32::try_from(v).map_err(|_| format!("{key} = {v} is out of range")),
+    }
 }
 
 fn payload_u64(payload: &serde_json::Value, key: &str, default: u64) -> u64 {
@@ -128,17 +129,28 @@ fn run_claimed_job(job: &serde_json::Value) -> (String, serde_json::Value) {
             );
         }
     };
-    let min_successes = payload
-        .get("min_successes")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32);
-    let config = BenchmarkConfig {
-        warmup_runs: payload_u32(&payload, "warmup", 1),
-        measured_runs: payload_u32(&payload, "runs", 5).max(1),
-        prompt: payload_string(&payload, "prompt").unwrap_or_else(|| "benchmark".to_string()),
-        max_tokens: payload_u32(&payload, "max_tokens", 32),
-        timeout_secs: payload_u64(&payload, "timeout_secs", 120),
-        min_successes,
+    let config = (|| -> Result<BenchmarkConfig, String> {
+        let min_successes = match payload.get("min_successes") {
+            Some(_) => Some(payload_u32(&payload, "min_successes", 0)?),
+            None => None,
+        };
+        Ok(BenchmarkConfig {
+            warmup_runs: payload_u32(&payload, "warmup", 1)?,
+            measured_runs: payload_u32(&payload, "runs", 5)?.max(1),
+            prompt: payload_string(&payload, "prompt").unwrap_or_else(|| "benchmark".to_string()),
+            max_tokens: payload_u32(&payload, "max_tokens", 32)?,
+            timeout_secs: payload_u64(&payload, "timeout_secs", 120),
+            min_successes,
+        })
+    })();
+    let config = match config {
+        Ok(config) => config,
+        Err(e) => {
+            return (
+                job_id,
+                serde_json::json!({"error": format!("invalid job payload: {e}")}),
+            );
+        }
     };
     match benchmark(&adapter, &profile, &model, &config) {
         Ok(report) => {
@@ -193,5 +205,18 @@ pub fn run_worker(args: &WorkerArgs) -> i32 {
         if !args.once {
             std::thread::sleep(std::time::Duration::from_secs(args.poll_secs.max(1)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_u32_rejects_values_that_would_wrap() {
+        let p = serde_json::json!({"runs": 4294967297u64, "warmup": 3});
+        assert!(payload_u32(&p, "runs", 5).is_err());
+        assert_eq!(payload_u32(&p, "warmup", 1), Ok(3));
+        assert_eq!(payload_u32(&p, "max_tokens", 32), Ok(32));
     }
 }

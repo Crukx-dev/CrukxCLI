@@ -81,7 +81,7 @@ pub fn run_benchmark(args: &BenchmarkArgs) -> i32 {
                 .filter_map(|m| m.peak_memory_kb)
                 .max();
             match peak {
-                Some(kb) => println!("peak:    {} MB", kb / 1024),
+                Some(kb) => println!("peak:    {:.1} MiB", kb as f64 / 1024.0),
                 None => println!("peak:    unknown"),
             }
             0

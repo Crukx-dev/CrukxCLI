@@ -271,6 +271,24 @@ fn fail_on_regression_catches_pure_metric_decay_that_still_passes_thresholds() {
         "VTR 100%→50% decay must fail under --fail-on-regression even though thresholds hold:\n{stderr}"
     );
     assert!(stderr.contains("VTR regressed"), "{stderr}");
+    // Headline, history and exit code must agree: a regression block is a
+    // BLOCK everywhere, not "PASS" with exit 1.
+    assert!(stderr.contains("BLOCKED"), "{stderr}");
+    let history = fs::read_to_string(dir.path().join(".crukx/runs.jsonl")).unwrap();
+    let last: serde_json::Value = serde_json::from_str(history.lines().last().unwrap()).unwrap();
+    assert_eq!(last["decision"], "BLOCKED", "{history}");
+
+    // ...so the failed run must not become the new baseline: the flag
+    // keeps blocking on the next run.
+    let again = Command::cargo_bin("crukx")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["gate", "--fail-on-regression", "--format", "json"])
+        .output()
+        .unwrap();
+    assert!(!again.status.success(), "regression baseline was poisoned");
+    let report: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(report["decision"], "BLOCKED");
 
     let without_flag = Command::cargo_bin("crukx")
         .unwrap()

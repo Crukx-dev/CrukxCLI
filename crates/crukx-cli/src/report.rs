@@ -107,13 +107,14 @@ fn reproduce_script(
     format!(
         "#!/bin/sh\n\
          # Reproduce artifact {hash} ({model}).\n\
-         # Provide the model file and the verifier-produced record used originally.\n\
+         # Provide the model file used originally.\n\
          set -e\n\
          DIR=$(cd \"$(dirname \"$0\")\" && pwd)\n\
          : \"${{MODEL:?set MODEL to the model file}}\"\n\
-         : \"${{VERIFICATION:?set VERIFICATION to the verifier-produced record}}\"\n\
-         crukx benchmark \"$MODEL\" --prompt {prompt} --runs {runs} --warmup {warmup} --max-tokens {tokens} --timeout-secs {timeout} --json > /tmp/crukx-repro-report.json\n\
-         crukx compare /tmp/crukx-repro-report.json \"$DIR/evidence.json\"\n",
+         OUT=$(mktemp)\n\
+         trap 'rm -f \"$OUT\"' EXIT\n\
+         crukx benchmark \"$MODEL\" --prompt {prompt} --runs {runs} --warmup {warmup} --max-tokens {tokens} --timeout-secs {timeout} --json > \"$OUT\"\n\
+         crukx compare \"$OUT\" \"$DIR/evidence.json\"\n",
         hash = manifest.artifact_hash.as_deref().unwrap_or("unknown"),
         model = manifest.model,
         prompt = shell_quote(&config.prompt),

@@ -22,10 +22,10 @@ inputs:
 
 outputs:
   decision:
-    description: "Gate decision (PASS or BLOCK)"
+    description: "Gate decision (PASS, BLOCK, or ERROR if crukx failed to run)"
     value: ${{ steps.gate.outputs.decision }}
   vtr:
-    description: "Verified Trust Rate"
+    description: "Verified Trust Rate (0-1) of this gate run; empty if unavailable"
     value: ${{ steps.gate.outputs.vtr }}
 
 runs:
@@ -76,14 +76,31 @@ runs:
           ARGS+=("--fail-on-regression")
         fi
 
-        OUTPUT=$(crukx "${ARGS[@]}" 2>&1) || true
-        echo "$OUTPUT"
+        # The exit code is the verdict (0 PASS, 1 BLOCK, anything else is an
+        # error). Never grep the rendered report: a non-blocking warn-mode
+        # contract renders as "BLOCK" in the table while the gate passes.
+        set +e
+        crukx "${ARGS[@]}"
+        STATUS=$?
+        set -e
 
-        if echo "$OUTPUT" | grep -q "BLOCK"; then
-          echo "decision=BLOCK" >> "$GITHUB_OUTPUT"
-          echo "::error::Gate BLOCKED — release blocked by crukx"
-          exit 1
-        else
-          echo "decision=PASS" >> "$GITHUB_OUTPUT"
-          echo "::notice::Gate PASSED — release approved by crukx"
-        fi
+        # VTR comes from the run this gate just appended to the ledger.
+        VTR=$(crukx history --last 1 --json 2>/dev/null | jq -r '.[-1].vtr // empty' 2>/dev/null || true)
+        echo "vtr=${VTR}" >> "$GITHUB_OUTPUT"
+
+        case "$STATUS" in
+          0)
+            echo "decision=PASS" >> "$GITHUB_OUTPUT"
+            echo "::notice::Gate PASSED — release approved by crukx"
+            ;;
+          1)
+            echo "decision=BLOCK" >> "$GITHUB_OUTPUT"
+            echo "::error::Gate BLOCKED — release blocked by crukx"
+            exit 1
+            ;;
+          *)
+            echo "decision=ERROR" >> "$GITHUB_OUTPUT"
+            echo "::error::crukx gate failed to run (exit $STATUS)"
+            exit "$STATUS"
+            ;;
+        esac
