@@ -1,7 +1,7 @@
-//! pass^k, verified against the real built binary with genuinely varying
-//! real process behavior (exit code = each spawned process's own PID
-//! parity — not a fixed/mocked value), matching the manual proof: 1/8
-//! runs passed, correctly reported and exited BLOCKED.
+//! pass^k, verified against the real built binary with real process
+//! behavior. The flaky fixture fails deterministically on exactly one run
+//! via a counter file in the replay cwd (repeats run sequentially there) —
+//! PID parity was environment-dependent (see gate_pass_k_e2e.rs).
 
 use assert_cmd::Command;
 use std::fs;
@@ -40,9 +40,16 @@ fn write_contract(dir: &std::path::Path, id: &str, executable: &str, arguments: 
 #[test]
 fn replay_repeat_reports_inconsistent_for_a_genuinely_flaky_real_command() {
     let dir = tempfile::tempdir().unwrap();
-    // exit code = this spawned process's own PID parity: genuinely varies
-    // run to run, not a fixed/predetermined value.
-    write_contract(dir.path(), "flaky", "sh", &["-c", "exit $(( $$ % 2 ))"]);
+    // Passes runs 1-7, fails run 8: a real flake with a known count.
+    write_contract(
+        dir.path(),
+        "flaky",
+        "sh",
+        &[
+            "-c",
+            "c=$(cat .flaky_count 2>/dev/null || echo 0); echo $((c+1)) > .flaky_count; [ $c -lt 7 ]",
+        ],
+    );
 
     let mut cmd = Command::cargo_bin("crukx").unwrap();
     let output = cmd
@@ -52,14 +59,11 @@ fn replay_repeat_reports_inconsistent_for_a_genuinely_flaky_real_command() {
         .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("pass^8:"), "{stderr}");
-    // Real PID parity across 8 real spawns won't be all-same in practice;
-    // if this ever flakes because the OS handed back 8 same-parity PIDs
-    // in a row, that's the test fixture's problem, not this assertion's.
     assert!(
-        stderr.contains("INCONSISTENT") || stderr.contains("CONSISTENT"),
+        stderr.contains("pass^8: 7/8 runs passed — INCONSISTENT"),
         "{stderr}"
     );
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
 }
 
 #[test]

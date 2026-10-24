@@ -296,23 +296,19 @@ pub fn run_gate(
     let (regression_detected, regression_details) =
         diff_against_last_green(last_green.as_ref(), &verdicts, reliability.vtr);
 
-    let gate_passed =
-        gate.decision == GateDecision::Pass && reliability.pass && sla_violations.is_empty();
-    let overall_decision = if gate_passed { "PASS" } else { "BLOCKED" };
+    // The regression block is part of the decision, not just the exit code:
+    // headline, reports and history must all agree, or a run that failed
+    // the regression check is recorded as PASS and becomes the next
+    // "last green" baseline.
     let blocked_by_regression = fail_on_regression && regression_detected;
-    let exit_code = if gate_passed && !blocked_by_regression {
-        0
-    } else {
-        1
-    };
+    let gate_passed = gate.decision == GateDecision::Pass
+        && reliability.pass
+        && sla_violations.is_empty()
+        && !blocked_by_regression;
+    let overall_decision = if gate_passed { "PASS" } else { "BLOCKED" };
+    let exit_code = if gate_passed { 0 } else { 1 };
 
-    record_run_history(
-        &state,
-        "gate",
-        if gate_passed { "PASS" } else { "BLOCKED" },
-        &reliability,
-        &verdicts,
-    );
+    record_run_history(&state, "gate", overall_decision, &reliability, &verdicts);
 
     let snapshot = GateReportSnapshot::new(
         policy_path,
