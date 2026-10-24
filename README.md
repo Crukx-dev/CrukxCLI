@@ -1,65 +1,111 @@
 # Crukx CLI
 
-**A release gate for AI-written software.** `crukx gate` replays a
-recorded agent session against a regression contract, checks it
-against reliability/security/latency constraints, and blocks the
-release when they aren't met — deterministically, offline, with no
-account required.
+The `crukx` command. Today it is a **release gate for AI-agent workflows**:
+it replays real recorded agent sessions and returns **PASS** or **BLOCK**
+before you ship. It also benchmarks and packages local models (GGUF via
+llama.cpp). It runs offline and needs no account.
 
+> **Where Crukx is heading.** Crukx is becoming the **control plane for model
+> efficiency**: exact model deltas, verification and benchmarks. The first new
+> commands are planned below ([§5](#5-whats-next-planned-not-built-yet)) and
+> are **not in this binary yet**. Everything in §1–§4 works today, and
+> `crukx gate` keeps its behavior and exit codes through the transition.
+
+---
+
+## 1. The 30-second version
+
+```bash
+crukx run -- npm test   # record a real session (commands, files, exit codes)
+crukx capture           # turn it into a regression contract (+ assert.mjs stub)
+crukx gate              # replay every contract in crukx.yml → PASS / BLOCKED
 ```
-crukx run -- npm test       # record a real session
-crukx capture                # turn it into a regression contract
-crukx gate                   # PASS/BLOCK against crukx.yml
-```
-
-## Why Crukx is fast — and why "PASS" actually means something
-
-Most AI-output checkers grade a single response with an LLM judge and
-call it reliability. That's cheap and it's also why "looks right" ships
-bugs: one run passing tells you nothing about whether the *next* run
-of the same workflow will too.
-
-Crukx replays the **real recorded trajectory** — actual shell commands,
-actual file writes, actual exit codes — against an assertion you write
-once. A contract can be replayed `k` times (`replay <id> -r 5`), and
-gate reports **pass^k**: every one of the `k` real re-executions must
-pass, not just one out of `k`. A workflow that's flaky 1 time in 5 is
-not "80% reliable" here — it's a contract you haven't earned a PASS on
-yet. That's the whole difference: nothing here is simulated, sampled,
-or judge-scored — every metric on the gate report traces back to a
-real process that actually ran.
 
 ```mermaid
 flowchart LR
-    A["crukx run -- &lt;cmd&gt;"] -->|records| B["Session\nreal commands, files, exit codes"]
-    B -->|"crukx capture"| C["Regression contract\n+ assert.mjs stub"]
-    C -->|"you write once"| D["assert.mjs\nwhat 'correct' means"]
+    A["crukx run -- &lt;cmd&gt;"] -->|records| B["Session<br/>real commands, files, exit codes"]
+    B -->|"crukx capture"| C["Regression contract<br/>+ assert.mjs stub"]
+    C -->|"you write once"| D["assert.mjs<br/>what 'correct' means"]
     D -->|"crukx gate / replay -r k"| E["k real re-executions"]
     E -->|"all k must PASS"| F{{"pass^k"}}
     F -->|yes| G(["✓ PASS"])
     F -->|no| H(["✗ BLOCKED"])
 ```
 
-## What `crukx gate` actually checks
+Nothing is simulated or scored by an LLM. Every number on the gate report
+comes from a real process that ran. A contract can be replayed `k` times, and
+it passes only if **all k** runs pass (pass^k). A workflow that fails 1 run in
+5 hasn't earned a PASS.
 
-All configured via `crukx.yml`, all optional:
+## 2. Every command today
+
+```mermaid
+flowchart TB
+    subgraph gate["Release gate"]
+        run["run"] --> capture["capture"] --> replay["replay"]
+        capture --> gatecmd["gate"]
+        gatecmd --> history["history"]
+        run --> review["review (TUI)"]
+        run --> vs["verify-session"]
+        judge["judge"] -.->|"drift baseline"| gatecmd
+    end
+    subgraph models["Local model track (GGUF / llama.cpp)"]
+        bench["benchmark"] --> compare["compare"]
+        bench --> deploy["deploy"] --> va["verify-artifact"]
+        deploy --> report["report"]
+        worker["worker"] -.->|"runs benchmark jobs<br/>from the cloud queue"| bench
+    end
+    doctor["doctor"]
+    completion["completion"]
+```
+
+| Command | What it does |
+|---|---|
+| `crukx run -- <cmd>` | Runs a command as a recorded session (hash-chained event log in `.crukx/events/`) |
+| `crukx capture [session]` | Turns a session into a regression contract + `assert.mjs` stub |
+| `crukx replay <id> [-r k]` | Replays one contract; `-r k` reports pass^k |
+| `crukx gate` | Replays every contract in `crukx.yml` and applies its constraints. Exit 0 = PASS, 1 = BLOCKED. `--format json\|junit\|markdown`, `--fail-on-regression` |
+| `crukx history` | Sparkline trends of VTR / P95 across recent runs (`--json` for scripts) |
+| `crukx review [session]` | Terminal UI over a recorded session |
+| `crukx verify-session <id>` | Proves a session log wasn't edited, truncated or reordered |
+| `crukx judge` | Measures an LLM judge's agreement with a human-labeled set; `gate` uses it to detect judge drift |
+| `crukx benchmark <model.gguf>` | Detects the device, runs a GGUF model N times via llama.cpp, reports latency / tok/s |
+| `crukx compare A.json B.json` | Compares two benchmark reports (refuses cross-hardware comparisons) |
+| `crukx deploy` | Packages a benchmarked candidate as an artifact; the verdict comes only from a verifier file, never flags |
+| `crukx verify-artifact <dir>` | Checks an artifact's manifest hash and evidence bundle |
+| `crukx report <dir>` | Writes the evidence report (`REPORT.md`) for an artifact |
+| `crukx worker` | Polls the Crukx control plane for benchmark jobs and runs them on this machine |
+| `crukx doctor` | Checks the local install (git, node, state dir, API key) |
+| `crukx completion <shell>` | Prints a shell completion script |
+
+## 3. What `crukx gate` checks
+
+Everything is configured in `crukx.yml` and every constraint is optional.
+
+```yaml
+contracts:
+  - id: checkout-flow
+    mode: block        # block (default) or warn
+    repeat: 5          # pass^5
+constraints:
+  vtr_minimum: 0.9
+  p95_latency_max_ms: 2000
+  reliability_sla_minimum: 0.5
+```
 
 | Constraint | What it checks |
 |---|---|
 | `vtr_minimum` | Fraction of contracts that PASSed (Verified Trajectory Rate) |
-| `diagnostic_coverage_minimum` | Fraction of BLOCKs localized to a specific pipeline stage, not just "something broke" |
-| `judge_max_agreement_drop` | LLM-judge drift vs. its own calibration baseline |
-| `security_critical_delta_max` / `security_high_delta_max` | New security findings introduced by this change |
-| `p95_latency_max_ms` | P95 wall-clock time across replayed steps, from real timing |
-| per-contract `repeat: k` | pass^k — see above |
-| per-contract `escalation: {retry_cost, risk_value}` | On BLOCK: cost-aware ACCEPT/RETRY/ESCALATE, `p_failure` from this contract's own real run history |
+| `diagnostic_coverage_minimum` | Fraction of BLOCKs traced to a specific stage, not just "something broke" |
+| `judge_max_agreement_drop` | LLM-judge drift vs. its calibration baseline |
+| `security_critical_delta_max` / `security_high_delta_max` | New security findings introduced by the change |
+| `p95_latency_max_ms` | P95 wall-clock time across replayed steps |
+| `reliability_sla_minimum` | Each repeated contract's Wilson lower bound (pessimistic pass rate) must clear this |
+| per contract `repeat: k` | pass^k |
+| per contract `escalation:` | On BLOCK: accept / retry / escalate, from cost and the contract's own history |
 
-## Tamper-evident by default
-
-Every recorded session's event log is hash-chained. `crukx
-verify-session <id>` proves the log hasn't been edited since `crukx
-run` wrote it — so a gate result can't be quietly rewritten after the
-fact to turn a BLOCK into a PASS.
+`--fail-on-regression` also fails the run when a contract or VTR got worse
+than the **last green run**. Logs are tamper-evident:
 
 ```mermaid
 sequenceDiagram
@@ -68,7 +114,6 @@ sequenceDiagram
     participant Log as .crukx/events/*.jsonl (hash-chained)
     participant Gate as crukx gate
     participant Verify as crukx verify-session
-
     Dev->>Run: crukx run -- <command>
     Run->>Log: append events, each hashed to the previous
     Dev->>Gate: crukx gate
@@ -79,76 +124,99 @@ sequenceDiagram
     Verify-->>Dev: intact ✓ / tampered ✗
 ```
 
-## See it run
-
-**`crukx gate`** — three real replays of a contract, pass^3, then the
-full metric readout:
-
 ![crukx gate](./assets/gate.png)
 
-**`crukx history`** — sparkline trends across recent gate/replay runs,
-no dashboard needed:
+## 4. How this repo is put together
 
-![crukx history](./assets/history.png)
+```mermaid
+flowchart TB
+    subgraph repo["CrukxCLI (this repo)"]
+        cli["crates/crukx-cli<br/>commands, output formats, gate runner"]
+        tui["crates/crukx-tui<br/>Ratatui session explorer"]
+        git["crates/crukx-git<br/>thin git wrappers"]
+        vendor["vendor/<br/>pinned engine crates"]
+        js["packages/crukx-js<br/>npm wrapper: downloads the binary"]
+        action["packages/crukx-github-action<br/>runs crukx gate in CI"]
+    end
+    engine["crukx-core repo<br/>crukx-core · crukx-storage · crukx-runner"]
+    cli --> tui
+    cli --> git
+    cli --> vendor
+    tui --> vendor
+    engine -- "re-vendored at a pinned rev" --> vendor
+```
 
-## Install
+- **`crates/`**: everything you interact with at the command line.
+- **`vendor/`**: an exact, pinned copy of the engine crates from the
+  `crukx-core` repo. `.cargo/config.toml` points cargo at it, so the build
+  never fetches the engine from GitHub. To update it, follow
+  [`vendor/README.md`](./vendor/README.md); don't edit files there by hand.
+- **`packages/`**: distribution. The npm shim (`@crukx/cli-rs`) picks the
+  right prebuilt binary for your OS/libc. The GitHub Action installs `crukx`
+  and runs `crukx gate` in a workflow.
+
+### Build and test
 
 ```bash
-cargo install --path crates/crukx-cli   # requires access to the private engine crate — see below
+cargo build -p crukx-cli                    # binary at target/debug/crukx
+cargo test --workspace                      # unit + end-to-end tests
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
-Prebuilt binaries (no build step, no private access needed) are the
-intended path for everyone else — published to crates.io / npm / Homebrew.
-Until that lands, build from a release tarball on the
-[Releases page](https://github.com/Crukx-dev/CrukxCLI/releases) once
-published.
+End-to-end tests (`crates/crukx-cli/tests/*_e2e.rs`) run the real built binary
+in temp directories. CI (`.github/workflows/crukx-rs-ci.yml`) runs on Ubuntu,
+macOS, Windows and several Linux distros.
 
-## Repo layout — what's here, what isn't
+## 5. What's next (planned, not built yet)
 
-```
-crates/
-├── crukx-cli/   command entry points, terminal UI/colors, the crukx.yml gate runner
-├── crukx-tui/   Ratatui session explorer (crukx review)
-└── crukx-git/   thin git wrappers: repo root, HEAD, tracked diff, sha256
+The design is in progress. Release 1 of the new direction ships three commands
+on top of [`crukx-crx`](https://github.com/Crukx-dev/crukx-crx), the CRX
+delta engine. They work on model weights alone, with no Python, no GPU and no
+network:
 
-packages/
-└── crukx-js/    npm shim
-```
-
-This repo is the CLI shell — everything you interact with at the
-command line. The reliability-gating **engine** underneath it (the
-contract/replay model, pass^k/VTRk consistency math, evidence graph,
-escalation policy, hash-chain implementation) lives in a private
-dependency and isn't published here. That's deliberate: the CLI's
-behavior is fully documented above and the binary is exactly what runs
-in your CI, but the engine that decides PASS/BLOCK is Crukx's, not
-forked. `Cargo.toml` in `crates/crukx-cli` and `crukx-tui` names the
-private crate for transparency — it just isn't one you can `git clone`.
-
-## Running the tests
-
-```bash
-cargo test -p crukx-cli -p crukx-tui -p crukx-git
+```mermaid
+flowchart LR
+    base["base model<br/>(safetensors)"] --> diff["crukx diff BASE TARGET"]
+    target["target model<br/>(fine-tune)"] --> diff
+    diff --> crx["target.crx<br/>exact delta + manifest"]
+    crx --> verify["crukx verify target.crx --base BASE"]
+    base --> verify
+    verify --> ok(["VERIFIED: target SHA-256 matches"])
+    base --> benchmark["crukx benchmark BASE TARGET"]
+    target --> benchmark
+    benchmark --> rep(["bytes avoided · reconstruct time<br/>median / P95 · environment"])
 ```
 
-Covers everything that ships in this repo: the CLI's command surface,
-terminal rendering, and git glue. The engine's own test suite runs in
-its private repo.
+| Release | Commands | Theme |
+|---|---|---|
+| R1 | `diff`, `verify`, `benchmark` | Prove the exact delta |
+| R1.x | `push`, `pull` | Distribute CRX artifacts |
+| R2 | `serve`, `scan` | Operate models |
+| R3 | `sync`, `optimize` | Coordinate model infrastructure |
 
-## Security
+> Today's `crukx benchmark` measures **llama.cpp runtime latency**. The R1
+> `benchmark` measures **base → target artifact economics**. How the two
+> coexist is part of the design.
 
-Found a vulnerability? See [SECURITY.md](./SECURITY.md) — don't file a
-public issue for it.
+`crukx gate` will get a deprecation notice on stderr (output and exit codes
+unchanged) and a `crukx migrate gate` helper that inspects and never deletes.
 
-## License
+## 6. Glossary
 
-Apache License 2.0 — see [LICENSE](./LICENSE). Covers everything in
-this repo (`crukx-cli`, `crukx-tui`, `crukx-git`, the npm shim): use
-it, fork it, ship it in a commercial product, all fine, and Apache 2.0's
-own patent grant + termination-on-litigation clause is exactly the
-protection that makes that safe for everyone building on it — it
-protects you from Crukx (and every other contributor) asserting a
-patent claim over code they contributed here, and it protects Crukx
-the same way against anyone else who contributes. It does not cover
-the private `crukx-core` engine this CLI depends on — that stays
-closed, unaffected by what this license permits.
+| Term | Meaning |
+|---|---|
+| **Session** | One recorded run: JSONL events under `.crukx/events/` |
+| **Contract** | Expected steps of a session + `assert.mjs` defining "correct" |
+| **pass^k** | Passes only if **all** k replays pass |
+| **VTR** | Verified Trajectory Rate: fraction of contracts that PASSed |
+| **Last green** | The most recent PASS run in `.crukx/runs.jsonl`, the baseline for `--fail-on-regression` |
+| **CRX** | Crukx's exact (lossless) model container / delta format (planned commands) |
+
+## Security and license
+
+Vulnerabilities: see [SECURITY.md](./SECURITY.md); don't open a public issue.
+
+Apache License 2.0 ([LICENSE](./LICENSE)) covers the code in `crates/` and
+`packages/`. The engine crates under `vendor/` come from the `crukx-core` repo
+and are not covered by this license.
