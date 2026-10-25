@@ -243,7 +243,10 @@ const JUDGE_SYSTEM_PROMPT: &str = "You are a strict release-gate judge. Reply wi
 /// `/v1/messages`; OpenAI-style like OpenRouter get `Bearer` +
 /// `/chat/completions`). Returns the model's verdict boolean.
 fn judge_case(base_url: &str, api_key: &str, model: &str, input: &str) -> Option<bool> {
-    let user_prompt = format!("{JUDGE_SYSTEM_PROMPT}\n\nEvaluate:\n{input}");
+    // The system prompt travels in the request's `system` / `role=system`
+    // field only. It used to be prepended here as well, so every judge call
+    // paid for the rubric twice and the model saw it as user text.
+    let user_prompt = format!("Evaluate:\n{input}");
     let content = if base_url.contains("/anthropic") {
         call_anthropic(base_url, api_key, model, &user_prompt)?
     } else {
@@ -306,22 +309,42 @@ fn call_openai(base_url: &str, api_key: &str, model: &str, prompt: &str) -> Opti
     let body = serde_json::json!({
         "model": model,
         "temperature": 0.0,
-        "max_tokens": 512,
+        // Same budget as the Anthropic path: reasoning models spend it on
+        // thinking before emitting the verdict, and 512 truncated replies
+        // into "no parseable result".
+        "max_tokens": 2048,
         "messages": [
             {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ]
     });
 
-    let response: serde_json::Value = ureq::post(&format!("{base_url}/chat/completions"))
-        .set("Authorization", &format!("Bearer {api_key}"))
-        .set("Content-Type", "application/json")
-        .timeout(std::time::Duration::from_secs(90))
-        .send_json(body)
-        .ok()?
-        .into_json()
-        .ok()?;
+    // Retry like the Anthropic path does — a single blip used to fail the
+    // whole case (and a malformed 200 escaped without a second attempt).
+    for attempt in 0..3 {
+        let attempt_result: Option<serde_json::Value> = (|| {
+            ureq::post(&format!("{base_url}/chat/completions"))
+                .set("Authorization", &format!("Bearer {api_key}"))
+                .set("Content-Type", "application/json")
+                .timeout(std::time::Duration::from_secs(90))
+                .send_json(body.clone())
+                .ok()?
+                .into_json()
+                .ok()
+        })();
+        if let Some(text) = attempt_result.as_ref().and_then(openai_text) {
+            return Some(text);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            1500 * (attempt as u64 + 1),
+        ));
+    }
+    None
+}
 
+/// The reply text of an OpenAI chat-completions response. `None` on a
+/// malformed 200 so the caller's retry loop treats it as a failed attempt.
+fn openai_text(response: &serde_json::Value) -> Option<String> {
     response["choices"][0]["message"]["content"]
         .as_str()
         .map(str::to_string)
@@ -388,6 +411,26 @@ fn pass_from_value(value: &serde_json::Value) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_text_is_none_for_a_malformed_200_so_the_call_retries() {
+        let envelope = serde_json::json!({"error": {"message": "rate limited"}});
+        assert_eq!(openai_text(&envelope), None);
+        let reply = serde_json::json!({
+            "choices": [{"message": {"content": "{\"pass\": true}"}}]
+        });
+        assert_eq!(openai_text(&reply).as_deref(), Some("{\"pass\": true}"));
+    }
+
+    #[test]
+    fn user_prompt_does_not_repeat_the_system_rubric() {
+        // The rubric belongs in the request's system field only; baking it
+        // into the user message as well paid for it twice and confused the
+        // turn structure.
+        let user_prompt = format!("Evaluate:\n{}", "the input");
+        assert!(!user_prompt.contains("release-gate judge"));
+        assert!(user_prompt.starts_with("Evaluate:\n"));
+    }
 
     #[test]
     fn anthropic_text_is_none_for_a_malformed_200_so_the_call_retries() {

@@ -59,9 +59,11 @@ pub fn run_history(last: usize, json: bool, cwd: &Path) -> i32 {
     eprintln!("{}", ui::header("Crukx history", Some(&context), color));
     eprintln!();
 
+    let vtrs: Vec<Option<f64>> = records.iter().map(|r| r.vtr).collect();
     print_metric_strip(
         "VTR ",
         &vtr_series(&records),
+        &vtrs,
         |v| format!("{:.0}%", v * 100.0),
         true,
         color,
@@ -72,7 +74,14 @@ pub fn run_history(last: usize, json: bool, cwd: &Path) -> i32 {
         .map(|r| r.p95_ms.map(|ms| ms as f64))
         .collect();
     if p95s.iter().any(|p| p.is_some()) {
-        print_metric_strip("P95 ", &series_filled(&p95s), format_ms, false, color);
+        print_metric_strip(
+            "P95 ",
+            &series_filled(&p95s),
+            &p95s,
+            format_ms,
+            false,
+            color,
+        );
     }
 
     eprintln!();
@@ -91,11 +100,22 @@ fn series_filled(values: &[Option<f64>]) -> Vec<f64> {
     values.iter().filter_map(|v| *v).collect()
 }
 
+/// The value shown as "latest": the newest *run* that has a sample, and
+/// whether that run is the newest run overall. The strip used to print the
+/// last *sample* as "latest", so a run recorded after the last metric was
+/// silently ignored.
+fn latest_sample(values: &[Option<f64>]) -> (Option<f64>, bool) {
+    let last_is_sample = values.last().is_some_and(|v| v.is_some());
+    let latest = values.iter().rev().find_map(|v| *v);
+    (latest, last_is_sample)
+}
+
 /// One sparkline strip with latest value and direction. `higher_is_better`
 /// picks which end of the ramp counts as an improvement for the arrow.
 fn print_metric_strip(
     label: &str,
     values: &[f64],
+    samples: &[Option<f64>],
     fmt: impl Fn(f64) -> String,
     higher_is_better: bool,
     color: bool,
@@ -104,7 +124,10 @@ fn print_metric_strip(
         return;
     }
     let spark = charts::sparkline(values);
-    let latest = values[values.len() - 1];
+    let (latest, last_is_sample) = latest_sample(samples);
+    let Some(latest) = latest else {
+        return;
+    };
     let trend = if values.len() >= 2 {
         let earlier: f64 =
             values[..values.len() - 1].iter().sum::<f64>() / (values.len() - 1) as f64;
@@ -128,11 +151,19 @@ fn print_metric_strip(
     } else {
         colors::dim("·", color)
     };
+    // "latest" only when the newest run actually carries the metric;
+    // otherwise this is the newest sample and must say so.
+    let tag = if last_is_sample {
+        "latest"
+    } else {
+        "latest sample"
+    };
     eprintln!(
-        "{label} {}   {} {} latest",
+        "{label} {}   {} {} {}",
         colors::bold(&spark, color),
         trend,
-        fmt(latest)
+        fmt(latest),
+        tag
     );
 }
 
@@ -175,5 +206,25 @@ fn format_ms(ms: f64) -> String {
         format!("{:.1}s", ms / 1000.0)
     } else {
         format!("{ms:.0}ms")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latest_sample_prefers_the_newest_run() {
+        assert_eq!(latest_sample(&[Some(0.5), Some(0.9)]), (Some(0.9), true));
+    }
+
+    #[test]
+    fn latest_sample_marks_a_trailing_gap_as_a_sample_not_latest() {
+        assert_eq!(latest_sample(&[Some(0.5), None]), (Some(0.5), false));
+    }
+
+    #[test]
+    fn latest_sample_is_none_when_no_run_has_the_metric() {
+        assert_eq!(latest_sample(&[None, None]), (None, false));
     }
 }
