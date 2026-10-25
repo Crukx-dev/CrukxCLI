@@ -83,6 +83,7 @@ pub fn replay_contract(
     // execute. Refuse instead of joining.
     let assertion = if crukx_core::security::is_safe_path_segment(&contract.assertion_file) {
         let assertion_file = assertion_dir.join(&contract.assertion_file);
+        warn_if_unedited_stub(&assertion_file, &contract.contract_id);
         run_assertion(&assertion_file, &assertion_context, cwd)
     } else {
         AssertResult {
@@ -107,6 +108,19 @@ pub fn replay_contract(
         steps,
         assertion,
         decision,
+    }
+}
+
+/// A freshly captured contract's assertion always passes. Say so on stderr
+/// (stdout and the decision stay as they are) until someone edits it.
+fn warn_if_unedited_stub(path: &Path, contract_id: &str) {
+    if std::fs::read_to_string(path).ok()
+        == Some(crukx_core::contracts::assertion_stub(contract_id))
+    {
+        eprintln!(
+            "warning: {} is still the generated stub and always passes; contract {contract_id} checks only the trajectory until you edit it",
+            path.display()
+        );
     }
 }
 
