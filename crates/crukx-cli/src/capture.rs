@@ -53,5 +53,6 @@ pub fn run_capture(session_id: &str, cwd: &Path) -> i32 {
     eprintln!("  Contract:  {}", contract_path.display());
     eprintln!("  Assertion: {}", assertion_path.display());
     eprintln!("Edit the assertion file to define what \"correct\" means for this workflow.");
+    eprintln!("Until you do, its assertion always passes: the contract checks only the steps.");
     0
 }
